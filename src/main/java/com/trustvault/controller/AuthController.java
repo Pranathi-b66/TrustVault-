@@ -5,25 +5,36 @@ import com.trustvault.entity.User;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.UserPrincipal;
 import com.trustvault.service.AuthService;
-import com.trustvault.service.WebAuthnService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * Password + webcam FaceID authentication surface.
+ *
+ * <p>Sign-up captures the 128-value facial descriptor in the same request as the profile so the
+ * 1-to-1 binding between account and face can never be half-created.</p>
+ */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
 
     private final AuthService authService;
-    private final WebAuthnService webAuthnService;
     private final UserRepository userRepository;
 
-    public AuthController(AuthService authService,
-                          WebAuthnService webAuthnService,
-                          UserRepository userRepository) {
+    public AuthController(AuthService authService, UserRepository userRepository) {
         this.authService = authService;
-        this.webAuthnService = webAuthnService;
         this.userRepository = userRepository;
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isBlank()) {
+            ip = request.getRemoteAddr();
+        }
+        return ip;
     }
 
     @PostMapping("/login")
@@ -31,22 +42,14 @@ public class AuthController {
         return ResponseEntity.ok(authService.login(request));
     }
 
-    // Step 1: Initiate profile and generate WebAuthn registration ceremony options
-    @PostMapping("/register-initiate")
-    public ResponseEntity<RegisterInitiateResponse> registerInitiate(@RequestBody RegisterRequest request) {
-        return ResponseEntity.ok(webAuthnService.initiateRegistration(request));
-    }
-
-    // Step 2: Verify device biometric passkey attestation and finalize identity persistence
-    @PostMapping("/register-complete")
-    public ResponseEntity<AuthResponse> registerComplete(@RequestBody RegisterCompleteRequest request) {
-        return ResponseEntity.ok(webAuthnService.completeRegistration(request));
-    }
-
-    // Direct registration (fallback)
+    /**
+     * Creates the profile and binds its exclusive facial descriptor in one transaction.
+     * A face already claimed by another account aborts the sign-up with {@code 400}.
+     */
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest request) {
-        return ResponseEntity.ok(authService.register(request));
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request,
+                                                 HttpServletRequest httpRequest) {
+        return ResponseEntity.ok(authService.register(request, getClientIp(httpRequest)));
     }
 
     @GetMapping("/me")

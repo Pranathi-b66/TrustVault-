@@ -1,12 +1,10 @@
 package com.trustvault.service;
 
+import com.trustvault.face.FaceProof;
 import com.trustvault.dto.DocumentResponse;
 import com.trustvault.entity.*;
 import com.trustvault.repository.DocumentPermissionRepository;
 import com.trustvault.repository.DocumentRepository;
-import com.trustvault.security.JwtTokenProvider;
-import io.jsonwebtoken.Claims;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,23 +21,20 @@ public class DocumentService {
     private final FileStorageService fileStorageService;
     private final PermissionService permissionService;
     private final AuditLogService auditLogService;
-    private final JwtTokenProvider jwtTokenProvider;
-
-    @Value("${trustvault.security.passkey-gate-enabled:true}")
-    private boolean passkeyGateEnabled;
+    private final FaceGateService faceGateService;
 
     public DocumentService(DocumentRepository documentRepository,
                            DocumentPermissionRepository permissionRepository,
                            FileStorageService fileStorageService,
                            PermissionService permissionService,
                            AuditLogService auditLogService,
-                           JwtTokenProvider jwtTokenProvider) {
+                           FaceGateService faceGateService) {
         this.documentRepository = documentRepository;
         this.permissionRepository = permissionRepository;
         this.fileStorageService = fileStorageService;
         this.permissionService = permissionService;
         this.auditLogService = auditLogService;
-        this.jwtTokenProvider = jwtTokenProvider;
+        this.faceGateService = faceGateService;
     }
 
     @Transactional
@@ -113,7 +108,7 @@ public class DocumentService {
     }
 
     @Transactional
-    public DownloadPayload downloadDocument(String documentId, String passkeyToken, String passkeyHeader, User user, String clientIp) {
+    public DownloadPayload downloadDocument(String documentId, FaceProof proof, User user, String clientIp) {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> {
                     Map<String, Object> details = new HashMap<>();
@@ -122,39 +117,12 @@ public class DocumentService {
                     return new AccessDeniedException("Access Denied: Document not found or unauthorized.");
                 });
 
-        // 1. Evaluate user permission & Burn-After-Reading consumption
-        String effectiveRole = permissionService.evaluateAndConsumeAccess(document, user, true, clientIp);
+        // 1. Action-time face gate. Runs before a burn-after-reading view is consumed so a
+        //    failed match never costs the recipient one of their permitted views.
+        faceGateService.enforce(user, documentId, FaceEnrollmentService.ACTION_DOWNLOAD, proof, clientIp);
 
-        // 2. Strict Biometric WebAuthn Passkey Gate Enforcement
-        String effectivePasskeyToken = (passkeyToken != null && !passkeyToken.isBlank()) ? passkeyToken : passkeyHeader;
-        boolean passkeyVerified = false;
-
-        if (effectivePasskeyToken != null && !effectivePasskeyToken.isBlank()) {
-            if ("test-passkey-verified".equals(effectivePasskeyToken) || "mock-passkey".equals(effectivePasskeyToken)) {
-                passkeyVerified = true;
-            } else if (jwtTokenProvider.validateToken(effectivePasskeyToken)) {
-                Claims claims = jwtTokenProvider.getClaimsFromToken(effectivePasskeyToken);
-                String tokenDocId = (String) claims.get("documentId");
-                String scope = (String) claims.get("scope");
-                String action = (String) claims.get("action");
-                String tokenUserId = (String) claims.get("userId");
-
-                if (("PASSKEY_VERIFIED_DOWNLOAD".equals(scope) || ("PASSKEY_ACTION_VERIFIED".equals(scope) && "DOWNLOAD".equalsIgnoreCase(action)))
-                        && documentId.equals(tokenDocId)
-                        && user.getId().equals(tokenUserId)) {
-                    passkeyVerified = true;
-                }
-            }
-        }
-
-        if (!passkeyVerified) {
-            Map<String, Object> details = new HashMap<>();
-            details.put("alert", "BIOMETRIC_DOWNLOAD_VERIFICATION_REQUIRED");
-            details.put("reason", "WebAuthn Biometric Passkey gate verification required before download streaming");
-            auditLogService.logEvent(user, user.getEmail(), AuditAction.ACCESS_DENIED, documentId, clientIp, AuditStatus.FAILURE, details);
-            auditLogService.logEvent(user, user.getEmail(), AuditAction.SECURITY_ALERT, documentId, clientIp, AuditStatus.FAILURE, details);
-            throw new AccessDeniedException("Biometric WebAuthn passkey verification required to download document.");
-        }
+        // 2. Evaluate user permission & Burn-After-Reading consumption
+        permissionService.evaluateAndConsumeAccess(document, user, true, clientIp);
 
         byte[] fileBytes = fileStorageService.loadFileBytes(document.getFilePath());
 
@@ -168,7 +136,7 @@ public class DocumentService {
     }
 
     @Transactional
-    public DocumentResponse updateDocument(String documentId, String newTitle, String newCategory, String passkeyToken, String passkeyHeader, User user, String clientIp) {
+    public DocumentResponse updateDocument(String documentId, String newTitle, String newCategory, FaceProof proof, User user, String clientIp) {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new AccessDeniedException("Access Denied: Document not found."));
 
@@ -180,37 +148,8 @@ public class DocumentService {
             throw new AccessDeniedException("Access Denied: You do not have permission to edit this document.");
         }
 
-        // Biometric Passkey Gate for Sensitive Action: EDIT
-        String effectivePasskeyToken = (passkeyToken != null && !passkeyToken.isBlank()) ? passkeyToken : passkeyHeader;
-        boolean passkeyVerified = false;
-
-        if (effectivePasskeyToken != null && !effectivePasskeyToken.isBlank()) {
-            if ("test-passkey-verified".equals(effectivePasskeyToken) || "mock-passkey".equals(effectivePasskeyToken)) {
-                passkeyVerified = true;
-            } else if (jwtTokenProvider.validateToken(effectivePasskeyToken)) {
-                Claims claims = jwtTokenProvider.getClaimsFromToken(effectivePasskeyToken);
-                String tokenDocId = (String) claims.get("documentId");
-                String scope = (String) claims.get("scope");
-                String action = (String) claims.get("action");
-                String tokenUserId = (String) claims.get("userId");
-
-                if ("PASSKEY_ACTION_VERIFIED".equals(scope)
-                        && "EDIT".equalsIgnoreCase(action)
-                        && documentId.equals(tokenDocId)
-                        && user.getId().equals(tokenUserId)) {
-                    passkeyVerified = true;
-                }
-            }
-        }
-
-        if (!passkeyVerified) {
-            Map<String, Object> details = new HashMap<>();
-            details.put("alert", "BIOMETRIC_EDIT_VERIFICATION_REQUIRED");
-            details.put("reason", "WebAuthn Biometric Passkey verification required before modifying document payload");
-            auditLogService.logEvent(user, user.getEmail(), AuditAction.ACCESS_DENIED, documentId, clientIp, AuditStatus.FAILURE, details);
-            auditLogService.logEvent(user, user.getEmail(), AuditAction.SECURITY_ALERT, documentId, clientIp, AuditStatus.FAILURE, details);
-            throw new AccessDeniedException("Biometric WebAuthn passkey verification required to edit document.");
-        }
+        // Action-time face gate for the sensitive EDIT action.
+        faceGateService.enforce(user, documentId, FaceEnrollmentService.ACTION_EDIT, proof, clientIp);
 
         if (newTitle != null && !newTitle.isBlank()) {
             document.setTitle(newTitle.trim());

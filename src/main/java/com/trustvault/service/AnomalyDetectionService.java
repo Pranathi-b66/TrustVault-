@@ -136,6 +136,31 @@ public class AnomalyDetectionService {
         }
     }
 
+    /**
+     * Current number of failures recorded inside the active window for the given originator.
+     * Read after an ACCESS_DENIED audit event so API responses can report how close the caller
+     * is to tripping the SECURITY_ALERT threshold.
+     */
+    public int currentFailureCount(String ipAddress, String userEmail) {
+        int ipCount = 0;
+        if (ipAddress != null && !ipAddress.isBlank()) {
+            FailureTracker tracker = ipFailures.get(ipAddress);
+            if (tracker != null) {
+                ipCount = tracker.count.get();
+            }
+        }
+
+        int userCount = 0;
+        if (userEmail != null && !userEmail.isBlank() && !"anonymous".equalsIgnoreCase(userEmail)) {
+            FailureTracker tracker = userFailures.get(userEmail);
+            if (tracker != null) {
+                userCount = tracker.count.get();
+            }
+        }
+
+        return Math.max(ipCount, userCount);
+    }
+
     public void recordSuccess(String ipAddress, String userEmail) {
         if (ipAddress != null) {
             FailureTracker tracker = ipFailures.get(ipAddress);

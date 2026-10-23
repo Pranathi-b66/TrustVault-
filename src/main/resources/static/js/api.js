@@ -56,14 +56,17 @@ const API = {
                 throw new Error('Authentication required or session expired.');
             }
 
-            if (res.status === 403) {
-                const errData = await res.json().catch(() => ({ message: 'Zero-Trust Access Denied.' }));
-                throw new Error(errData.message || 'Access Denied (403 Forbidden).');
-            }
-
             if (!res.ok) {
-                const errData = await res.json().catch(() => ({ message: `HTTP Error ${res.status}` }));
-                throw new Error(errData.message || `Request failed with status ${res.status}`);
+                const errData = await res.json().catch(() => ({
+                    message: res.status === 403 ? 'Zero-Trust Access Denied.' : `HTTP Error ${res.status}`
+                }));
+                const error = new Error(errData.message || `Request failed with status ${res.status}`);
+                // Preserve the machine-readable face contract (code / anomalyCount / matchScore).
+                error.status = res.status;
+                error.code = errData.code || null;
+                error.anomalyCount = errData.anomalyCount;
+                error.matchScore = errData.matchScore;
+                throw error;
             }
 
             // If response is a file blob/download
@@ -92,10 +95,15 @@ const API = {
         return res;
     },
 
-    async register(email, password, fullName, role) {
+    /**
+     * Creates the account and binds its exclusive face descriptor in one request, so no
+     * half-registered profile can exist without an enrollment. The server derives the canonical
+     * hash and rejects a face already owned by another identity with 400.
+     */
+    async register(email, password, fullName, role, faceDescriptor, deviceLabel) {
         const res = await this.request('/api/auth/register', {
             method: 'POST',
-            body: JSON.stringify({ email, password, fullName, role })
+            body: JSON.stringify({ email, password, fullName, role, faceDescriptor, deviceLabel })
         });
         this.setToken(res.token);
         this.setUser(res);
@@ -137,15 +145,15 @@ const API = {
         return await this.request(`/api/documents?${q.toString()}`);
     },
 
-    async updateDocument(id, title, category, passkeyToken) {
+    async updateDocument(id, title, category, faceToken) {
         const headers = {};
-        if (passkeyToken) {
-            headers['X-Passkey-Token'] = passkeyToken;
+        if (faceToken) {
+            headers['X-Face-Token'] = faceToken;
         }
         return await this.request(`/api/documents/${id}`, {
             method: 'PUT',
             headers,
-            body: JSON.stringify({ title, category, passkeyToken })
+            body: JSON.stringify({ title, category, faceToken })
         });
     },
 
@@ -155,16 +163,41 @@ const API = {
         });
     },
 
-    async downloadDocument(id, passkeyToken) {
+    async downloadDocument(id, faceToken) {
         const headers = {};
-        if (passkeyToken) {
-            headers['X-Passkey-Token'] = passkeyToken;
+        if (faceToken) {
+            headers['X-Face-Token'] = faceToken;
         }
-        return await this.request(`/api/documents/${id}/download${passkeyToken ? `?passkeyToken=${encodeURIComponent(passkeyToken)}` : ''}`, {
+        return await this.request(`/api/documents/${id}/download${faceToken ? `?faceToken=${encodeURIComponent(faceToken)}` : ''}`, {
             method: 'GET',
             headers,
             asBlob: true
         });
+    },
+
+    // ==========================================================
+    // Webcam FaceID biometrics (face-api.js descriptors)
+    // ==========================================================
+    async registerFace(email, descriptor, deviceLabel) {
+        return await this.request('/api/auth/biometric/register-face', {
+            method: 'POST',
+            body: JSON.stringify({ email, descriptor, deviceLabel })
+        });
+    },
+
+    async verifyFace(documentId, action, descriptor) {
+        return await this.request('/api/auth/biometric/verify-face', {
+            method: 'POST',
+            body: JSON.stringify({ documentId, action, descriptor })
+        });
+    },
+
+    async getFaceStatus() {
+        return await this.request('/api/auth/biometric/face-status');
+    },
+
+    async revokeFace() {
+        return await this.request('/api/auth/biometric/face', { method: 'DELETE' });
     },
 
     // Permissions (ACL)

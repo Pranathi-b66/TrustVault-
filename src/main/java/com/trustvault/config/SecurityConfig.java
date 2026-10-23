@@ -102,6 +102,7 @@ public class SecurityConfig {
                 })
             )
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/biometric", "/api/auth/biometric/**").authenticated()
                 .requestMatchers(
                         "/",
                         "/index.html",

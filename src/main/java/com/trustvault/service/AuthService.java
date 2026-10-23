@@ -23,13 +23,16 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final FaceEnrollmentService faceEnrollmentService;
 
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
-                       JwtTokenProvider jwtTokenProvider) {
+                       JwtTokenProvider jwtTokenProvider,
+                       FaceEnrollmentService faceEnrollmentService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.faceEnrollmentService = faceEnrollmentService;
     }
 
     @PostConstruct
@@ -70,7 +73,7 @@ public class AuthService {
 
         String token = jwtTokenProvider.generateTokenFromUser(user.getId(), user.getEmail(), user.getRole().name());
 
-        return new AuthResponse(
+        AuthResponse response = new AuthResponse(
                 token,
                 user.getId(),
                 user.getEmail(),
@@ -78,29 +81,55 @@ public class AuthService {
                 user.getRole(),
                 user.getStatus()
         );
+        // Lets the client skip the enrollment prompt when the face is already bound.
+        response.setFaceEnrolled(faceEnrollmentService.getStatus(user).isEnrolled());
+        return response;
     }
 
     @Transactional
-    public AuthResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new IllegalArgumentException("Email already registered: " + request.getEmail());
+    public AuthResponse register(RegisterRequest request, String clientIp) {
+        String email = request.getEmail() == null ? "" : request.getEmail().trim();
+        if (email.isEmpty()) {
+            throw new IllegalArgumentException("Email is required.");
         }
+        if (request.getPassword() == null || request.getPassword().isBlank()) {
+            throw new IllegalArgumentException("Password is required.");
+        }
+        if (userRepository.existsByEmail(email)) {
+            throw new IllegalArgumentException("Email already registered: " + email);
+        }
+        if (request.getFaceDescriptor() == null || request.getFaceDescriptor().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "A webcam face scan is required to create a TrustVault account.");
+        }
+
+        // The descriptor itself is the evidence: it must be a complete embedding, it must not
+        // already be bound to another identity, and it is stored exclusively against this account
+        // in the same transaction.
+
+        // Reject an already-claimed face BEFORE the profile row is created, so a duplicate
+        // biometric enrolment leaves no orphaned account behind.
+        faceEnrollmentService.assertFaceClaimable(request.getFaceDescriptor(), email, clientIp);
 
         Role assignedRole = request.getRole() != null ? request.getRole() : Role.VIEWER;
 
         User user = new User(
                 UUID.randomUUID().toString(),
-                request.getEmail(),
+                email,
                 passwordEncoder.encode(request.getPassword()),
                 request.getFullName(),
                 assignedRole,
                 UserStatus.ACTIVE
         );
 
-        User saved = userRepository.save(user);
+        User saved = userRepository.saveAndFlush(user);
+
+        // Same transaction: if the face cannot be bound, the account is rolled back with it.
+        faceEnrollmentService.enroll(saved, request.getFaceDescriptor(), clientIp);
+
         String token = jwtTokenProvider.generateTokenFromUser(saved.getId(), saved.getEmail(), saved.getRole().name());
 
-        return new AuthResponse(
+        AuthResponse response = new AuthResponse(
                 token,
                 saved.getId(),
                 saved.getEmail(),
@@ -108,5 +137,7 @@ public class AuthService {
                 saved.getRole(),
                 saved.getStatus()
         );
+        response.setFaceEnrolled(true);
+        return response;
     }
 }

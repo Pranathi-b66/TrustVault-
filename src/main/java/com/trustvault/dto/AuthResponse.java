@@ -10,6 +10,8 @@ public class AuthResponse {
     private String fullName;
     private Role role;
     private UserStatus status;
+    /** True once this identity holds its exclusive face descriptor. */
+    private boolean faceEnrolled;
 
     public AuthResponse() {}
 
@@ -68,5 +70,13 @@ public class AuthResponse {
 
     public void setStatus(UserStatus status) {
         this.status = status;
+    }
+
+    public boolean isFaceEnrolled() {
+        return faceEnrolled;
+    }
+
+    public void setFaceEnrolled(boolean faceEnrolled) {
+        this.faceEnrolled = faceEnrolled;
     }
 }

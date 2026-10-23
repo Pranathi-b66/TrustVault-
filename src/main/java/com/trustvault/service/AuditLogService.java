@@ -31,9 +31,30 @@ public class AuditLogService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Writes the row in its own transaction so a denial is preserved even when the business
+     * transaction rolls back.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public AuditLog logEvent(User user, String userEmail, AuditAction action, String documentId,
                              String ipAddress, AuditStatus status, Map<String, Object> detailsMap) {
+        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap);
+    }
+
+    /**
+     * Writes the row on the caller's connection, so it commits and rolls back together with the
+     * change it describes. Required for sign-up: the account row is still uncommitted there, and a
+     * {@link Propagation#REQUIRES_NEW} insert would have to take a foreign-key lock on that parent
+     * row and stall against its own caller until the InnoDB lock-wait timeout expires.
+     */
+    @Transactional(propagation = Propagation.REQUIRED)
+    public AuditLog logEventInTransaction(User user, String userEmail, AuditAction action, String documentId,
+                                          String ipAddress, AuditStatus status, Map<String, Object> detailsMap) {
+        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap);
+    }
+
+    private AuditLog persistEvent(User user, String userEmail, AuditAction action, String documentId,
+                                  String ipAddress, AuditStatus status, Map<String, Object> detailsMap) {
         String jsonDetails = null;
         if (detailsMap != null && !detailsMap.isEmpty()) {
             try {

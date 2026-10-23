@@ -134,42 +134,37 @@ function initAuthListeners() {
         const btn = document.getElementById('btn-submit-register');
         const origText = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Awaiting Biometric Passkey...';
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Awaiting Webcam Face Scan...';
 
         try {
-            showToast('Zero-Trust Policy: Please complete device biometric enrollment prompt...', 'info');
-            const res = await WebAuthn.mandatoryBiometricSignUp(fullName, email, password, role);
-            showToast(`Registration Complete! Biometric passkey successfully bound for ${res.fullName}.`, 'success');
+            // Step 1: capture the facial descriptor locally. Nothing is sent until the scan
+            // completes, so cancelling the prompt can never create a half-registered account.
+            showToast('Zero-Trust Policy: align your face inside the oval to bind this account.', 'info');
+            const scan = await FaceIDUX.capture({
+                title: 'Mandatory Webcam FaceID Enrollment',
+                subtitle: 'Your account is bound to exactly one face. Align your face inside the oval and press Scan Face; a face already registered to another account is rejected.',
+                actionLabel: 'Scan Face & Register'
+            });
+
+            // Step 2: the profile and its exclusive descriptor are created in one transaction. The
+            // server derives the canonical hash and rejects a face owned by anyone else with 400.
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Binding face descriptor & creating account...';
+            const res = await API.register(email, password, fullName, role, scan.descriptor, 'webcam');
+            showToast(`Registration complete! Face descriptor bound to ${res.fullName}.`, 'success');
             renderDashboard(res);
         } catch (err) {
-            showToast(err.message, 'error');
+            showToast(`Registration failed: ${err.message}`, 'error');
         } finally {
             btn.disabled = false;
             btn.innerHTML = origText;
         }
     });
 
-    // WebAuthn Passkey Login Button
-    document.getElementById('btn-login-passkey').addEventListener('click', async () => {
-        const email = document.getElementById('login-email').value.trim();
-        try {
-            showToast('Initiating FIDO2 passkey verification...', 'info');
-            const me = await WebAuthn.loginWithPasskey(email);
-            showToast(`Biometric authentication successful: ${me.fullName}`, 'success');
-            renderDashboard(me);
-        } catch (err) {
-            showToast(err.message, 'error');
-        }
-    });
-
-    // Register Device Passkey Button
-    document.getElementById('btn-register-passkey').addEventListener('click', async () => {
-        try {
-            showToast('Follow device prompt to create your biometric passkey...', 'info');
-            await WebAuthn.registerPasskey();
-            showToast('FIDO2 biometric passkey successfully registered to your identity!', 'success');
-        } catch (err) {
-            showToast(err.message, 'error');
+    // Enroll / re-enroll the webcam face descriptor
+    document.getElementById('btn-enroll-face').addEventListener('click', async () => {
+        const enrolled = await promptFaceEnrollment(false);
+        if (enrolled) {
+            showToast('Face descriptor enrolled. Download and edit actions now require a live face match.', 'success');
         }
     });
 
@@ -290,9 +285,9 @@ async function loadOwnedDocuments() {
                             class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-950 text-teal-300 border border-teal-800 hover:bg-teal-900 transition">
                         <i class="fa-solid fa-user-plus mr-1"></i> Share & Burn
                     </button>
-                    <button onclick="triggerBiometricDownload('${doc.id}', '${escapeHtml(doc.title)}')"
+                    <button onclick="triggerFaceDownload('${doc.id}', '${escapeHtml(doc.title)}')"
                             class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 transition">
-                        <i class="fa-solid fa-fingerprint mr-1"></i> Download
+                        <i class="fa-solid fa-camera mr-1"></i> Download
                     </button>
                     <button onclick="deleteDoc('${doc.id}')"
                             class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-rose-950/60 text-rose-300 border border-rose-800 hover:bg-rose-900 transition">
@@ -357,10 +352,10 @@ async function loadSharedDocuments() {
                                 <i class="fa-solid fa-pen-to-square mr-1"></i> Edit
                             </button>
                         ` : ''}
-                        <button onclick="triggerBiometricDownload('${doc.id}', '${escapeHtml(doc.title)}')"
+                        <button onclick="triggerFaceDownload('${doc.id}', '${escapeHtml(doc.title)}')"
                                 class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold shadow-lg shadow-teal-500/20 transition flex items-center space-x-1">
-                            <i class="fa-solid fa-fingerprint text-base"></i>
-                            <span>Biometric Stream</span>
+                            <i class="fa-solid fa-camera text-base"></i>
+                            <span>FaceID Stream</span>
                         </button>
                     </td>
                 </tr>
@@ -396,9 +391,9 @@ document.getElementById('form-search-docs').addEventListener('submit', async (e)
                 <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">${escapeHtml(doc.effectivePermission)}</span></td>
                 <td class="px-4 py-3 text-xs text-slate-400">${formatDate(doc.createdAt)}</td>
                 <td class="px-4 py-3 text-right">
-                    <button onclick="triggerBiometricDownload('${doc.id}', '${escapeHtml(doc.title)}')"
+                    <button onclick="triggerFaceDownload('${doc.id}', '${escapeHtml(doc.title)}')"
                             class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-950 text-teal-300 border border-teal-800 hover:bg-teal-900 transition">
-                        <i class="fa-solid fa-fingerprint mr-1"></i> Download
+                        <i class="fa-solid fa-camera mr-1"></i> Download
                     </button>
                 </td>
             </tr>
@@ -768,70 +763,33 @@ document.getElementById('form-edit-document').addEventListener('submit', async (
     const title = document.getElementById('edit-title').value.trim();
     const category = document.getElementById('edit-category').value;
 
-    const modal = document.getElementById('modal-biometric-prompt');
-    const msg = document.getElementById('biometric-status-msg');
-    modal.classList.remove('hidden');
-    msg.textContent = 'Touch sensor or verify Windows Hello / Touch ID / FIDO2 Passkey to authorize EDIT...';
-
     try {
-        let passkeyToken;
-        if (WebAuthn.isAvailable()) {
-            try {
-                passkeyToken = await WebAuthn.authorizeEditWithBiometrics(docId);
-            } catch (authErr) {
-                console.warn('Native biometric assertion returned:', authErr);
-                msg.textContent = 'Hardware biometric prompt cancelled or unconfigured. Proceed with zero-trust assertion?';
-                passkeyToken = 'test-passkey-verified';
-            }
-        } else {
-            passkeyToken = 'test-passkey-verified';
-        }
+        // Action-time gate: the server matches this live capture against THIS user's descriptor
+        // and only then issues the short-lived EDIT token.
+        const faceToken = await FaceIDUX.authorize('EDIT', docId);
+        showToast(`Face verified! Updating "${title}"...`, 'info');
 
-        modal.classList.add('hidden');
-        showToast(`Biometric assertion verified! Updating "${title}"...`, 'info');
-
-        await API.updateDocument(docId, title, category, passkeyToken);
-        showToast(`Document "${title}" updated under biometric authorization.`, 'success');
+        await API.updateDocument(docId, title, category, faceToken);
+        showToast(`Document "${title}" updated under FaceID authorization.`, 'success');
         closeEditModal();
         if (currentTab === 'owned') loadOwnedDocuments();
         if (currentTab === 'shared') loadSharedDocuments();
     } catch (err) {
-        modal.classList.add('hidden');
         showToast(`Edit blocked: ${err.message}`, 'error');
+        if (err.code === 'FACE_NOT_ENROLLED' && await promptFaceEnrollment(true)) {
+            showToast('Face enrolled. Submit the edit again to continue.', 'info');
+        }
     }
 });
 
-// Biometric Download Gate Orchestrator
-let biometricPendingDownload = null;
-
-async function triggerBiometricDownload(docId, title) {
-    const modal = document.getElementById('modal-biometric-prompt');
-    const msg = document.getElementById('biometric-status-msg');
-    modal.classList.remove('hidden');
-    msg.textContent = 'Touch sensor or verify Windows Hello / Touch ID / FIDO2 Passkey...';
-
-    biometricPendingDownload = { docId, title };
-
+// Webcam FaceID Download Gate Orchestrator
+async function triggerFaceDownload(docId, title) {
     try {
-        let passkeyToken;
-        if (WebAuthn.isAvailable()) {
-            try {
-                passkeyToken = await WebAuthn.authorizeDownloadWithBiometrics(docId);
-            } catch (authErr) {
-                // If user has not yet registered a passkey on device, prompt fallback
-                console.warn('Native biometric assertion returned:', authErr);
-                msg.textContent = 'Hardware biometric prompt cancelled or unconfigured. Proceed with zero-trust token assertion?';
-                passkeyToken = 'test-passkey-verified';
-            }
-        } else {
-            passkeyToken = 'test-passkey-verified';
-        }
-
-        modal.classList.add('hidden');
-        showToast(`Biometric passkey verified! Decrypting ${title}...`, 'success');
+        const faceToken = await FaceIDUX.authorize('DOWNLOAD', docId);
+        showToast(`Face verified! Decrypting ${title}...`, 'success');
 
         // Stream and trigger browser save
-        const blob = await API.downloadDocument(docId, passkeyToken);
+        const blob = await API.downloadDocument(docId, faceToken);
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.style.display = 'none';
@@ -846,16 +804,34 @@ async function triggerBiometricDownload(docId, title) {
         if (currentTab === 'shared') loadSharedDocuments();
         if (currentTab === 'owned') loadOwnedDocuments();
     } catch (err) {
-        modal.classList.add('hidden');
         showToast(`Download blocked: ${err.message}`, 'error');
+        if (err.code === 'FACE_NOT_ENROLLED' && await promptFaceEnrollment(true)) {
+            showToast('Face enrolled. Retry the download to continue.', 'info');
+        }
         if (currentTab === 'shared') loadSharedDocuments();
-    } finally {
-        biometricPendingDownload = null;
     }
 }
 
-function cancelBiometricPrompt() {
-    document.getElementById('modal-biometric-prompt').classList.add('hidden');
-    biometricPendingDownload = null;
-    showToast('Biometric passkey verification cancelled. Download aborted.', 'warning');
+/**
+ * Captures and binds a face descriptor for the signed-in identity.
+ * Returns true when the enrollment succeeded.
+ */
+async function promptFaceEnrollment(mandatory) {
+    const user = API.getUser();
+    if (!user) {
+        showToast('Sign in before enrolling a face.', 'error');
+        return false;
+    }
+    try {
+        await FaceIDUX.enroll(user.email, { mandatory: !!mandatory });
+        return true;
+    } catch (err) {
+        showToast(`Face enrollment failed: ${err.message}`, 'error');
+        return false;
+    }
+}
+
+function cancelFacePrompt() {
+    FaceIDUX.cancel();
+    showToast('Face verification cancelled. Action aborted.', 'warning');
 }

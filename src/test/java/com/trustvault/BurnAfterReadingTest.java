@@ -1,6 +1,7 @@
 package com.trustvault;
 
 import com.trustvault.dto.DocumentResponse;
+import com.trustvault.dto.FaceVerificationResponse;
 import com.trustvault.dto.GrantPermissionRequest;
 import com.trustvault.entity.PermissionLevel;
 import com.trustvault.entity.Role;
@@ -9,7 +10,9 @@ import com.trustvault.entity.UserStatus;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.JwtTokenProvider;
 import com.trustvault.service.DocumentService;
+import com.trustvault.service.FaceEnrollmentService;
 import com.trustvault.service.PermissionService;
+import com.trustvault.support.FaceFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,6 +48,9 @@ public class BurnAfterReadingTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private FaceEnrollmentService faceEnrollmentService;
+
     private User owner;
     private User recipient;
     private String recipientToken;
@@ -62,6 +68,18 @@ public class BurnAfterReadingTest {
         });
 
         recipientToken = jwtTokenProvider.generateTokenFromUser(recipient.getId(), recipient.getEmail(), recipient.getRole().name());
+
+        // The recipient must hold an exclusive face enrollment before any download is allowed.
+        // The fixture is deterministic, so re-running the suite keeps the same 1-to-1 binding.
+        faceEnrollmentService.enroll(recipient, FaceFixtures.descriptor(recipient.getEmail()), "127.0.0.1");
+    }
+
+    /** Mints a short-lived DOWNLOAD authorisation by re-scanning the recipient's enrolled face. */
+    private String mintDownloadToken(String documentId) {
+        FaceVerificationResponse response = faceEnrollmentService.verifyForAction(
+                recipient, documentId, FaceEnrollmentService.ACTION_DOWNLOAD,
+                FaceFixtures.rescan(recipient.getEmail()), "127.0.0.1");
+        return response.getFaceToken();
     }
 
     @Test
@@ -76,13 +94,14 @@ public class BurnAfterReadingTest {
         // 1st download attempt: succeeds (consumes the 1 permitted view)
         mockMvc.perform(get("/api/documents/" + doc.getId() + "/download")
                         .header("Authorization", "Bearer " + recipientToken)
-                        .header("X-Passkey-Token", "mock-passkey"))
+                        .header("X-Face-Token", mintDownloadToken(doc.getId())))
                 .andExpect(status().isOk());
 
-        // 2nd download attempt: burned! Must return 403 Forbidden
+        // 2nd download attempt: the scan still verifies, but the view budget is burned, so the
+        // rejection must come from the burn-after-reading rule rather than the face gate.
         mockMvc.perform(get("/api/documents/" + doc.getId() + "/download")
                         .header("Authorization", "Bearer " + recipientToken)
-                        .header("X-Passkey-Token", "mock-passkey"))
+                        .header("X-Face-Token", mintDownloadToken(doc.getId())))
                 .andExpect(status().isForbidden());
     }
 

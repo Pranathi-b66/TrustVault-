@@ -69,19 +69,6 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- CBOR format for WebAuthn FIDO2 attestation parsing -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.dataformat</groupId>
-            <artifactId>jackson-dataformat-cbor</artifactId>
-        </dependency>
-        
-        <!-- Bouncy Castle for Cryptographic Passkey EC Verification -->
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.78.1</version>
-        </dependency>
-        
         <!-- Spring Boot Starter Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

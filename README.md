@@ -1,6 +1,6 @@
 # TrustVault — Zero-Trust Secure Document Sharing Platform
 
-TrustVault is a production-ready, security-first document management and sharing platform built with **Java Spring Boot 3**, **MySQL 8.0**, and **Tailwind CSS**. It implements zero-trust architecture, WebAuthn/FIDO2 biometric passkeys, immutable WORM audit trails, burn-after-reading links, IDOR prevention, and real-time security anomaly detection.
+TrustVault is a production-ready, security-first document management and sharing platform built with **Java Spring Boot 3**, **MySQL 8.0**, and **Tailwind CSS**. It implements zero-trust architecture, webcam-based FaceID verification (face-api.js descriptors), immutable WORM audit trails, burn-after-reading links, IDOR prevention, and real-time security anomaly detection.
 
 ---
 
@@ -13,10 +13,11 @@ TrustVault is a production-ready, security-first document management and sharing
    - Complete prevention of Insecure Direct Object References (IDOR): unauthenticated or unauthorized users trying to view, download, edit, or delete any document immediately receive `403 Forbidden` with full audit logging.
    - Universal folder visibility is prohibited.
 
-2. **Working WebAuthn Biometric Passkeys (FIDO2):**
-   - **Registration:** `/api/auth/webauthn/register-challenge` & `/register-verify` store public keys in `user_credentials` via `navigator.credentials.create()`.
-   - **Login:** `/api/auth/webauthn/login-challenge` & `/login-verify` authenticate via `navigator.credentials.get()`.
-   - **Biometric Download Gate:** The secure download endpoint (`GET /api/documents/{id}/download`) **strictly requires a verified biometric passkey prompt** before streaming file bytes.
+2. **Webcam FaceID Verification (face-api.js descriptors, no WebAuthn / passkeys):**
+   - **Enrollment at Sign-Up:** the camera modal captures a 128-value facial descriptor (`tinyFaceDetector` + 68 landmarks + `FaceRecognitionNet`) and `POST /api/auth/register` creates the account plus its face binding in one transaction, so a cancelled or rejected scan never leaves a half-registered profile behind.
+   - **Strict 1-to-1 Uniqueness:** `biometric_templates.face_descriptor` is bound to `user_id` and `email`, its canonical hash is unique, and every enrollment is cross-checked with the euclidean matcher, so a face already bound to another account is rejected with `400 Bad Request` (`FACE_ALREADY_REGISTERED` — "Face already registered to another account.").
+   - **Explicit Capture Only:** the modal opens the webcam only when invoked, overlays an oval alignment guide, and scans only when the user presses **Scan Face**. Script-dispatched events are ignored, so an autofilled form or a cached OS credential can never produce a scan on its own.
+   - **Action-Time Gate:** `GET /api/documents/{id}/download` and `PUT /api/documents/{id}` require a fresh descriptor that matches *that user's* stored embedding (similarity ≥ 0.40, i.e. euclidean distance ≤ 0.60); a mismatch returns `403 Forbidden` and writes `ACCESS_DENIED` plus `SECURITY_ALERT` rows.
 
 3. **Instant Employee Offboarding (Fast-Kill Switch):**
    - Endpoint `PUT /api/admin/users/{id}/deactivate` flips user status to `INACTIVE`.
@@ -39,9 +40,9 @@ TrustVault is a production-ready, security-first document management and sharing
 
 ## 🛠️ Technology Stack
 
-- **Backend:** Java 21 / 24, Spring Boot 3.3.5, Spring Security 6, Spring Data JPA, JJWT 0.12.6, Jackson CBOR, Bouncy Castle.
+- **Backend:** Java 21 / 24, Spring Boot 3.3.5, Spring Security 6, Spring Data JPA, JJWT 0.12.6, Jackson, AES-256-GCM descriptor sealing.
 - **Database:** MySQL 8.0 (`trustvault` schema with custom WORM triggers).
-- **Frontend:** Vanilla HTML5, Vanilla JavaScript (ES6+), locally compiled Tailwind CSS, FontAwesome icons.
+- **Frontend:** Vanilla HTML5, Vanilla JavaScript (ES6+), face-api.js 1.7.15 from jsDelivr (TinyFaceDetector + FaceLandmark68Net + FaceRecognitionNet), locally compiled Tailwind CSS, FontAwesome icons.
 - **Testing:** JUnit 5, Spring Boot Test, MockMvc, AssertJ.
 
 ---
@@ -54,13 +55,13 @@ The system automatically initializes default passwords on first startup if empty
 | :--- | :--- | :--- | :--- |
 | `admin@trustvault.internal` | `Admin@123` | **ADMIN** | Security Administrator (User offboarding, WORM audit inspector, anomaly alerts) |
 | `owner@trustvault.internal` | `Owner@123` | **OWNER** | Alice (Uploads assets, grants ACLs, configures Burn-After-Reading) |
-| `viewer@trustvault.internal` | `Viewer@123` | **VIEWER** | Bob (Consumes shared assets via biometric passkey download) |
+| `viewer@trustvault.internal` | `Viewer@123` | **VIEWER** | Bob (Consumes shared assets after a live webcam face scan) |
 
 ---
 
 ## 🧪 Automated Integration Tests
 
-Execute the comprehensive test suite verifying IDOR protection, WORM immutability, burn links, and anomaly detection:
+Execute the comprehensive test suite verifying IDOR protection, face uniqueness and action gating, WORM immutability, burn links, and anomaly detection:
 
 ```powershell
 mvn test
@@ -72,18 +73,24 @@ mvn test
    - User B cannot download User A's private document (`403 Forbidden`).
    - User B cannot update User A's private document (`403 Forbidden`).
    - User B cannot delete User A's private document (`403 Forbidden`).
-   - User A cannot download without biometric passkey assertion (`403 Forbidden`).
-   - User A with verified passkey token successfully downloads file (`200 OK`).
-2. `AuditLogImmutabilityTest`:
+   - User A cannot download without a face scan (`403 Forbidden`).
+   - User A with a verified face token successfully downloads file (`200 OK`).
+2. `FaceUniquenessIntegrationTest`:
+   - A byte-identical descriptor cannot be enrolled by a second account (`400`, `detectedBy=exact-hash`).
+   - A noisy re-scan of an already-claimed face is caught by the euclidean matcher (`400`, `detectedBy=face-match`).
+   - Sign-up binds the account and its face atomically; a claimed face aborts registration and creates no user row.
+   - Download/edit without proof is rejected; a non-matching capture is audited as `ACCESS_DENIED` + `SECURITY_ALERT` and counted by the anomaly detector.
+   - Repeated mismatches trip `CONSECUTIVE_ACCESS_DENIED_EXCEEDED`, and face tokens are bound to one document and one action.
+3. `AuditLogImmutabilityTest`:
    - Direct SQL `UPDATE` on `audit_logs` is rejected by trigger with SQLSTATE `45000`.
    - Direct SQL `DELETE` on `audit_logs` is rejected by trigger with SQLSTATE `45000`.
-3. `BurnAfterReadingTest`:
+4. `BurnAfterReadingTest`:
    - Single-use link consumes view on first read; second read returns `403 Forbidden`.
    - Expired link returns `403 Forbidden`.
-4. `InstantOffboardingTest`:
+5. `InstantOffboardingTest`:
    - Deactivated user immediately loses access (`403 Forbidden`).
    - Event logged as `ACCOUNT_INACTIVE_ACCESS_ATTEMPT`.
-5. `SecurityAnomalyDetectionTest`:
+6. `SecurityAnomalyDetectionTest`:
    - 3 consecutive `ACCESS_DENIED` events trigger automatic `SECURITY_ALERT` insertion.
 
 ---

@@ -22,7 +22,7 @@
                         <span class="text-xl font-black tracking-tight bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">TrustVault</span>
                         <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 uppercase tracking-widest font-semibold">Zero-Trust</span>
                     </div>
-                    <p class="text-xs text-slate-400 hidden sm:block">FIDO2 WebAuthn &bull; Immutable WORM Compliance</p>
+                                        <p class="text-xs text-slate-400 hidden sm:block">Webcam FaceID Biometrics &bull; Immutable WORM Compliance</p>
                 </div>
             </div>
 
@@ -34,9 +34,9 @@
                     <span id="nav-user-status" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                 </div>
 
-                <button id="btn-register-passkey" title="Register Device Biometrics (FIDO2 Passkey)" class="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-teal-950 text-teal-300 border border-teal-700 hover:bg-teal-900 transition">
-                    <i class="fa-solid fa-fingerprint text-teal-400"></i>
-                    <span>Add Passkey</span>
+                <button id="btn-enroll-face" title="Enroll your facial descriptor" class="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-700 hover:bg-emerald-900 transition">
+                    <i class="fa-solid fa-face-smile text-emerald-400"></i>
+                    <span>Enroll Face</span>
                 </button>
 
                 <button id="btn-logout" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-950/60 text-rose-300 border border-rose-800 hover:bg-rose-900 transition">
@@ -64,7 +64,7 @@
                         <i class="fa-solid fa-vault text-2xl text-slate-950"></i>
                     </div>
                     <h2 class="text-2xl font-bold tracking-tight text-white">TrustVault Access</h2>
-                    <p class="text-xs text-slate-400 mt-1">Authenticate using Enterprise Credentials or Biometric Passkey</p>
+                                        <p class="text-xs text-slate-400 mt-1">Sign in with your password; sensitive actions require a live webcam face scan</p>
                 </div>
 
                 <!-- Tabs: Login vs Register -->
@@ -95,34 +95,23 @@
                         <i class="fa-solid fa-right-to-bracket"></i>
                         <span>Authenticate</span>
                     </button>
-
-                    <div class="relative my-4 flex items-center justify-center">
-                        <div class="border-t border-slate-800 w-full"></div>
-                        <span class="bg-slate-900 px-3 text-[11px] text-slate-500 font-mono uppercase">Or Passwordless</span>
-                    </div>
-
-                    <!-- WebAuthn Biometric Passkey Login -->
-                    <button type="button" id="btn-login-passkey" class="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-teal-300 border border-teal-800/80 font-semibold rounded-xl text-sm transition flex items-center justify-center space-x-2">
-                        <i class="fa-solid fa-fingerprint text-teal-400 text-base"></i>
-                        <span>Login with Biometric Passkey</span>
-                    </button>
                 </form>
 
                 <!-- Register Form -->
-                <form id="form-register" class="space-y-4 hidden">
+                <form id="form-register" class="space-y-4 hidden" autocomplete="off">
                     <div>
                         <label class="block text-xs font-semibold text-slate-300 mb-1">Full Name</label>
-                        <input id="reg-name" type="text" required placeholder="Dr. Alice Smith"
+                        <input id="reg-name" type="text" required autocomplete="off" placeholder="Dr. Alice Smith"
                                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-300 mb-1">Email Address</label>
-                        <input id="reg-email" type="email" required placeholder="alice@trustvault.internal"
+                        <input id="reg-email" type="email" required autocomplete="off" placeholder="alice@trustvault.internal"
                                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
-                        <input id="reg-password" type="password" required placeholder="Choose a strong password"
+                        <input id="reg-password" type="password" required autocomplete="new-password" placeholder="Choose a strong password"
                                class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500">
                     </div>
                     <div>
@@ -134,12 +123,12 @@
                         </select>
                     </div>
                     <div class="p-2.5 rounded-xl bg-teal-950/60 border border-teal-800 text-[11px] text-teal-300 flex items-start space-x-2">
-                        <i class="fa-solid fa-fingerprint text-base mt-0.5 text-teal-400"></i>
-                        <span><strong>Zero-Trust Mandatory Biometric Enrollment:</strong> Submitting will immediately prompt your device authenticator (Windows Hello, Touch ID, Face ID, or Passkey). Registration will abort if cancelled.</span>
+                        <i class="fa-solid fa-face-smile text-base mt-0.5 text-teal-400"></i>
+                        <span><strong>Zero-Trust Mandatory FaceID Enrollment:</strong> Submitting opens the webcam. Align your face inside the oval and press Scan Face once to capture a 128-value facial descriptor — only the numbers leave the browser, never an image, and no cached credential can satisfy the gate. The descriptor is bound exclusively to this account, and a face already registered elsewhere is rejected.</span>
                     </div>
                     <button type="submit" id="btn-submit-register" class="w-full py-2.5 px-4 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-xl text-sm shadow-lg shadow-teal-500/20 transition flex items-center justify-center space-x-2">
-                        <i class="fa-solid fa-fingerprint"></i>
-                        <span>Register & Bind Biometric Passkey</span>
+                        <i class="fa-solid fa-camera"></i>
+                        <span>Register &amp; Bind FaceID</span>
                     </button>
                 </form>
 
@@ -245,7 +234,7 @@
                         <span>Documents Shared With You</span>
                         <span class="text-xs font-normal text-teal-400">(ACL Bound)</span>
                     </h3>
-                    <p class="text-xs text-slate-400">Access granted via granular ACL permissions. Downloads strictly gated by Biometric WebAuthn passkey verification.</p>
+                                        <p class="text-xs text-slate-400">Access granted via granular ACL permissions. Downloads strictly gated by live webcam face matching.</p>
                 </div>
 
                 <div class="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
@@ -258,7 +247,7 @@
                                     <th class="px-4 py-3">Permission</th>
                                     <th class="px-4 py-3">Burn-After-Reading</th>
                                     <th class="px-4 py-3">Expiry</th>
-                                    <th class="px-4 py-3 text-right">Biometric Download</th>
+                                                                        <th class="px-4 py-3 text-right">Facial Verification</th>
                                 </tr>
                             </thead>
                             <tbody id="table-shared-docs" class="divide-y divide-slate-800/60 font-sans">
@@ -430,7 +419,7 @@
                     <div class="flex items-center justify-between">
                         <div>
                             <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center space-x-2">
-                                <i class="fa-solid fa-fingerprint text-teal-400"></i>
+                                                            <i class="fa-solid fa-clipboard-list text-teal-400"></i>
                                 <span>WORM Compliance Audit Trail (Append-Only)</span>
                             </h3>
                             <p class="text-xs text-slate-400">Guaranteed by MySQL <code class="text-teal-400">BEFORE UPDATE</code> and <code class="text-teal-400">BEFORE DELETE</code> triggers raising <code class="text-teal-400">SIGNAL SQLSTATE '45000'</code>.</p>
@@ -542,7 +531,7 @@
                     <div>
                         <label class="block text-slate-400 mb-1 font-semibold">Permission Level</label>
                         <select id="grant-level" class="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500">
-                            <option value="READ">READ (View & Biometric Download)</option>
+                                                        <option value="READ">READ (View &amp; FaceID Download)</option>
                             <option value="EDIT">EDIT (Update Metadata)</option>
                         </select>
                     </div>
@@ -619,7 +608,7 @@
                 </div>
                 <div class="p-2.5 rounded-xl bg-cyan-950/60 border border-cyan-800/80 text-[11px] text-cyan-300 flex items-start space-x-2">
                     <i class="fa-solid fa-shield-halved text-base mt-0.5 text-cyan-400"></i>
-                    <span><strong>Biometric Verification Required:</strong> Saving this change requires physical biometric passkey assertion to prevent unauthorized tampering.</span>
+                                        <span><strong>FaceID Verification Required:</strong> Saving this change opens the webcam and requires a fresh face scan matched against your enrolled descriptor to prevent unauthorized tampering.</span>
                 </div>
 
                 <div class="pt-2 flex justify-end space-x-2">
@@ -627,36 +616,62 @@
                         Cancel
                     </button>
                     <button type="submit" id="btn-submit-edit" class="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl text-xs shadow-lg shadow-cyan-500/20 transition flex items-center space-x-1.5">
-                        <i class="fa-solid fa-fingerprint"></i>
-                        <span>Verify & Save</span>
+                                                <i class="fa-solid fa-camera"></i>
+                        <span>Verify &amp; Save</span>
                     </button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- ======================= MODAL: BIOMETRIC PASSOVER PROMPT ======================= -->
-    <div id="modal-biometric-prompt" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md hidden">
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 relative">
-            <div class="w-16 h-16 rounded-2xl bg-teal-950 text-teal-400 border border-teal-800 flex items-center justify-center mx-auto shadow-xl shadow-teal-500/20">
-                <i class="fa-solid fa-fingerprint text-3xl animate-pulse"></i>
+    <!-- ============== MODAL: WEBCAM FACEID (ENROLLMENT & ACTION-TIME VERIFICATION) ============== -->
+    <div id="modal-face-prompt" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md hidden">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 relative">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-face-smile text-teal-400"></i>
+                    <span id="face-prompt-title-text">Facial Verification</span>
+                </h3>
+                <button type="button" onclick="cancelFacePrompt()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
-            <div>
-                <h3 class="text-lg font-bold text-white">Biometric Passkey Required</h3>
-                <p class="text-xs text-slate-400 mt-1">Zero-Trust Security requires physical biometric verification before decrypting and streaming file bytes.</p>
+
+            <p id="face-prompt-subtitle" class="text-xs text-slate-400 leading-relaxed">
+                Align your face within the frame.
+            </p>
+
+            <div class="relative w-full mx-auto rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden" style="aspect-ratio: 4 / 3; max-width: 320px;">
+                <video id="face-camera" class="w-full h-full block" autoplay playsinline muted style="object-fit: cover; transform: scaleX(-1); background: #020617;"></video>
+                <div id="face-guide" class="absolute inset-0 pointer-events-none">
+                    <div class="absolute left-1/2 top-1/2 border-2 border-teal-400"
+                         style="width: 58%; height: 80%; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.55); transition: border-color 200ms ease;"></div>
+                </div>
+                <span class="absolute bottom-2 left-1/2 text-[10px] font-mono text-teal-200 bg-slate-950/70 px-2 py-0.5 rounded-full" style="transform: translateX(-50%);">Align your face within the frame</span>
             </div>
-            <div id="biometric-status-msg" class="text-xs font-mono text-teal-400 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                Touch sensor or verify Windows Hello / Touch ID / FIDO2 Key...
+
+            <p class="text-[11px] text-slate-500 text-center -mt-1">
+                No image and no cached credential ever leaves this device &mdash; only a 128-value facial descriptor is sent, and it is matched live on every sensitive action.
+            </p>
+
+            <div id="face-status-msg" class="text-xs font-mono text-teal-300 bg-slate-950 p-2.5 rounded-xl border border-teal-800">
+                Initialising webcam...
             </div>
-            <button onclick="cancelBiometricPrompt()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition">
-                Cancel
-            </button>
+
+            <div class="flex justify-end space-x-2">
+                <button type="button" onclick="cancelFacePrompt()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition">
+                    Cancel
+                </button>
+                <button type="button" id="btn-run-face-scan" class="px-5 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-xl text-xs shadow-lg shadow-teal-500/20 transition inline-flex items-center space-x-1.5">
+                    <i class="fa-solid fa-camera"></i>
+                    <span>Scan Face</span>
+                </button>
+            </div>
         </div>
     </div>
 
     <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js"></script>
     <script src="js/api.js"></script>
-    <script src="js/webauthn.js"></script>
+    <script src="js/faceid.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

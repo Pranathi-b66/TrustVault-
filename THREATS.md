@@ -1,7 +1,7 @@
 # TrustVault Threat Model & Zero-Trust Security Architecture
 
 ## 1. Executive Summary
-**TrustVault** is an enterprise-grade Zero-Trust Secure Document Sharing Platform architected to operate under the assumption that the network perimeter is already compromised. TrustVault combines **FIDO2 / WebAuthn Biometric Passkeys**, **Contextual Access Control Lists (ACL)**, **Burn-After-Reading Ephemeral Links**, **Instant Employee Offboarding Kill-Switches**, and **Cryptographically Enforced WORM (Write Once, Read Many) Compliance** to eliminate single points of failure.
+**TrustVault** is an enterprise-grade Zero-Trust Secure Document Sharing Platform architected to operate under the assumption that the network perimeter is already compromised. TrustVault combines **Webcam FaceID Verification (face-api.js descriptors)**, **Contextual Access Control Lists (ACL)**, **Burn-After-Reading Ephemeral Links**, **Instant Employee Offboarding Kill-Switches**, and **Cryptographically Enforced WORM (Write Once, Read Many) Compliance** to eliminate single points of failure.
 
 ---
 
@@ -9,7 +9,7 @@
 
 | Threat Category | Attack Vector & Scenario | Impact Level | Architectural Mitigation & Verification |
 | :--- | :--- | :--- | :--- |
-| **Spoofing Identity** | Attacker steals user password or intercepts bearer tokens via phishing or MITM. | **CRITICAL** | • **FIDO2 / WebAuthn Passkeys**: Bound to hardware authenticators using public key cryptography (ES256/RS256).<br>• Biometric prompt required prior to streaming file bytes (`/api/documents/{id}/download`).<br>• Short-lived JWT tokens signed with HMAC-SHA256. |
+| **Spoofing Identity** | Attacker steals user password or intercepts bearer tokens via phishing or MITM. | **CRITICAL** | • **Face Descriptor Binding**: each account owns exactly one 128-value facial descriptor (unique hash + euclidean cross-check), so a stolen password alone cannot pass a sensitive action.<br>• Webcam FaceID prompt required prior to streaming file bytes (`/api/documents/{id}/download`) or mutating a document (`PUT /api/documents/{id}`).<br>• Short-lived JWT tokens signed with HMAC-SHA256. |
 | **Tampering with Data** | Insider adversary or rogue DBA attempts to modify compliance audit entries to conceal unauthorized exfiltration. | **CRITICAL** | • **MySQL WORM Triggers**: Immutable database triggers (`trg_audit_logs_no_update` and `trg_audit_logs_no_delete`) raising `SIGNAL SQLSTATE '45000'`.<br>• Hibernate `spring.jpa.hibernate.ddl-auto=validate` to preserve triggers.<br>• `@Immutable` JPA entity definition. |
 | **Repudiation** | User denies having uploaded, accessed, granted, or deleted a sensitive asset. | **HIGH** | • **Denormalized Historical Snapshot**: Every audit log captures user UUID, email snapshot, client IP (`X-Forwarded-For`), action enum, timestamp with microsecond precision (`timestamp(6)`), and structured JSON event metadata.<br>• Historical logs remain preserved even if user accounts are purged (`ON DELETE SET NULL`). |
 | **Information Disclosure (IDOR)** | Attacker enumerates UUIDs or sequential IDs to access User A's private confidential documents. | **CRITICAL** | • **Contextual Zero-Trust ACL**: Every document request validates explicit ownership or explicit grant row in `document_permissions`.<br>• Unauthorized requests immediately abort with `403 Forbidden` and log `ACCESS_DENIED`.<br>• No universal directory or folder browsing. |
@@ -44,6 +44,13 @@ When an employee departs or is suspected of credential leakage:
 - If **3 consecutive failures** occur within a **5-minute sliding window**, the system automatically elevates the threat level and inserts a high-priority `SECURITY_ALERT` into `audit_logs`.
 - Alerts are streamed directly to the Admin Security Dashboard with flashing alert indicators.
 
-### 3.5. Biometric Passkey Gated Download
-- To prevent stolen laptop or shoulder-surfing downloads, file streaming requires a fresh WebAuthn passkey assertion (`navigator.credentials.get()`).
-- The server validates the cryptographic assertion and issues a scoped, 120-second token bound to that specific document ID. File bytes are only streamed if this passkey assertion is valid.
+### 3.5. Face-Gated Download and Edit
+- To prevent stolen-laptop or shoulder-surfing actions, `GET /api/documents/{id}/download` and `PUT /api/documents/{id}` require a fresh webcam capture taken at the moment of the action.
+- The browser runs `face-api.js` locally (TinyFaceDetector + 68 landmarks + FaceRecognitionNet) and transmits only the 128-value descriptor — no image or video frame leaves the device. Descriptors are sealed at rest with AES-256-GCM and indexed by a canonical SHA-256 hash for exact-replay detection.
+- The probe is compared against the requesting user's own embedding only, using euclidean distance (`similarity = clamp(1 - distance)`, threshold 0.40). A successful match issues a 120-second token scoped to that user, that document, and that action; a mismatch, an unenrolled account, or a missing/replayed token returns `403 Forbidden` and writes `ACCESS_DENIED` plus `SECURITY_ALERT` rows.
+- **Residual risk (documented):** a browser-side embedding model provides geometric verification, not certified presentation-attack detection. High-assurance deployments should pair it with server-side liveness challenges or a certified PAD SDK.
+
+### 3.6. Face Enrollment Uniqueness (Duplicate-Identity Defense)
+- `biometric_templates` stores `face_descriptor` alongside `user_id` and `email`, with a unique key on `face_hash`; `user_id` and `email` are also unique, so one account owns exactly one face.
+- Sign-up runs a pre-flight check — exact hash first, then the euclidean matcher against all existing embeddings — before the user row is written; a claimed face aborts registration with `400 Bad Request` (`FACE_ALREADY_REGISTERED`, "Face already registered to another account.") and logs `SECURITY_ALERT` without leaving an orphaned account.
+- Concurrent enrollments are stopped by the database unique keys, which surface as the same `400` response.

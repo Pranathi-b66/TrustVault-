@@ -1,5 +1,6 @@
 package com.trustvault.controller;
 
+import com.trustvault.face.FaceProof;
 import com.trustvault.dto.DocumentResponse;
 import com.trustvault.entity.User;
 import com.trustvault.repository.UserRepository;
@@ -40,6 +41,18 @@ public class DocumentController {
         return ip;
     }
 
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<DocumentResponse> uploadDocument(
             @RequestParam("file") MultipartFile file,
@@ -71,16 +84,22 @@ public class DocumentController {
     @GetMapping("/{id}/download")
     public ResponseEntity<ByteArrayResource> downloadDocument(
             @PathVariable("id") String id,
-            @RequestParam(value = "passkeyToken", required = false) String passkeyToken,
-            @RequestHeader(value = "X-Passkey-Token", required = false) String passkeyHeader,
+            @RequestParam(value = "faceToken", required = false) String faceTokenParam,
+            @RequestHeader(value = "X-Face-Token", required = false) String faceTokenHeader,
+            @RequestParam(value = "faceDescriptor", required = false) String faceDescriptorParam,
+            @RequestHeader(value = "X-Face-Descriptor", required = false) String faceDescriptorHeader,
             @AuthenticationPrincipal UserPrincipal principal,
             HttpServletRequest request) {
 
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
+        FaceProof proof = FaceProof.of(
+                firstNonBlank(faceTokenParam, faceTokenHeader),
+                firstNonBlank(faceDescriptorParam, faceDescriptorHeader));
+
         DocumentService.DownloadPayload payload = documentService.downloadDocument(
-                id, passkeyToken, passkeyHeader, user, getClientIp(request));
+                id, proof, user, getClientIp(request));
 
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(payload.getMimeType()))
@@ -92,8 +111,10 @@ public class DocumentController {
     public ResponseEntity<DocumentResponse> updateDocument(
             @PathVariable("id") String id,
             @RequestBody Map<String, String> body,
-            @RequestParam(value = "passkeyToken", required = false) String passkeyParam,
-            @RequestHeader(value = "X-Passkey-Token", required = false) String passkeyHeader,
+            @RequestParam(value = "faceToken", required = false) String faceTokenParam,
+            @RequestHeader(value = "X-Face-Token", required = false) String faceTokenHeader,
+            @RequestParam(value = "faceDescriptor", required = false) String faceDescriptorParam,
+            @RequestHeader(value = "X-Face-Descriptor", required = false) String faceDescriptorHeader,
             @AuthenticationPrincipal UserPrincipal principal,
             HttpServletRequest request) {
 
@@ -102,9 +123,13 @@ public class DocumentController {
 
         String title = body.get("title");
         String category = body.get("category");
-        String passkeyToken = passkeyParam != null ? passkeyParam : body.get("passkeyToken");
 
-        DocumentResponse resp = documentService.updateDocument(id, title, category, passkeyToken, passkeyHeader, user, getClientIp(request));
+        FaceProof proof = FaceProof.of(
+                firstNonBlank(faceTokenParam, faceTokenHeader, body.get("faceToken")),
+                firstNonBlank(faceDescriptorParam, faceDescriptorHeader, body.get("faceDescriptor")));
+
+        DocumentResponse resp = documentService.updateDocument(
+                id, title, category, proof, user, getClientIp(request));
         return ResponseEntity.ok(resp);
     }
 

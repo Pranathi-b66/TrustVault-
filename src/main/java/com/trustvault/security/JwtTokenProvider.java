@@ -48,11 +48,12 @@ public class JwtTokenProvider {
                 .compact();
     }
 
-    public String generateDownloadPasskeyToken(String userId, String email, String documentId) {
-        return generateActionPasskeyToken(userId, email, documentId, "DOWNLOAD");
-    }
-
-    public String generateActionPasskeyToken(String userId, String email, String documentId, String action) {
+    /**
+     * Mints the short-lived token that authorises a single sensitive document action after a
+     * successful facial match. It is bound to {@code userId + documentId + action} and
+     * cannot be used to satisfy a different action.
+     */
+    public String generateFaceActionToken(String userId, String email, String documentId, String action) {
         Date now = new Date();
         // 2 minutes valid for one-time sensitive action
         Date expiryDate = new Date(now.getTime() + 120_000);
@@ -62,7 +63,7 @@ public class JwtTokenProvider {
         claims.put("email", email);
         claims.put("documentId", documentId);
         claims.put("action", action);
-        claims.put("scope", "PASSKEY_ACTION_VERIFIED");
+        claims.put("scope", "FACE_ACTION_VERIFIED");
 
         return Jwts.builder()
                 .claims(claims)
