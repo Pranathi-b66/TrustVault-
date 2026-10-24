@@ -54,9 +54,12 @@ public class FaceGateService {
         }
 
         if (presented.faceDescriptor() != null) {
-            // Matches against this user's enrollment only; throws 403 + audit on mismatch.
+            // Matches against this user's enrollment only; throws 403 + audit on mismatch, and
+            // rejects the request outright when the timestamped challenge is missing, older than
+            // 30 seconds or has already been redeemed.
             faceEnrollmentService.verifyForAction(
-                    user, documentId, normalisedAction, presented.faceDescriptor(), clientIp);
+                    user, documentId, normalisedAction, presented.faceDescriptor(),
+                    presented.challengeToken(), clientIp);
             return;
         }
 

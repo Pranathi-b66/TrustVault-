@@ -22,19 +22,22 @@ public class DocumentService {
     private final PermissionService permissionService;
     private final AuditLogService auditLogService;
     private final FaceGateService faceGateService;
+    private final AuditSnapshotService auditSnapshotService;
 
     public DocumentService(DocumentRepository documentRepository,
                            DocumentPermissionRepository permissionRepository,
                            FileStorageService fileStorageService,
                            PermissionService permissionService,
                            AuditLogService auditLogService,
-                           FaceGateService faceGateService) {
+                           FaceGateService faceGateService,
+                           AuditSnapshotService auditSnapshotService) {
         this.documentRepository = documentRepository;
         this.permissionRepository = permissionRepository;
         this.fileStorageService = fileStorageService;
         this.permissionService = permissionService;
         this.auditLogService = auditLogService;
         this.faceGateService = faceGateService;
+        this.auditSnapshotService = auditSnapshotService;
     }
 
     @Transactional
@@ -64,7 +67,7 @@ public class DocumentService {
         details.put("sizeBytes", saved.getFileSizeBytes());
         details.put("mimeType", saved.getMimeType());
         details.put("category", saved.getCategory());
-        auditLogService.logEvent(user, user.getEmail(), AuditAction.UPLOAD, saved.getId(), clientIp, AuditStatus.SUCCESS, details);
+        auditLogService.logEvent(user, user.getEmail(), AuditAction.UPLOAD, saved.getId(), clientIp, AuditStatus.SUCCESS, details, null, auditSnapshotService.documentSnapshot(saved));
 
         return toDocumentResponse(saved, "OWNER", null);
     }
@@ -117,11 +120,17 @@ public class DocumentService {
                     return new AccessDeniedException("Access Denied: Document not found or unauthorized.");
                 });
 
-        // 1. Action-time face gate. Runs before a burn-after-reading view is consumed so a
+        // 1. Real-time authorization, executed before anything else. A JWT claim is only evidence
+        //    of identity: this per-transaction query is the authority on whether the caller may
+        //    still touch the document. A revoked grant is rejected here, before the face gate runs
+        //    and before a single byte is read from disk.
+        permissionService.requireLiveAccess(document, user, PermissionLevel.READ, clientIp);
+
+        // 2. Action-time face gate. Runs before a burn-after-reading view is consumed so a
         //    failed match never costs the recipient one of their permitted views.
         faceGateService.enforce(user, documentId, FaceEnrollmentService.ACTION_DOWNLOAD, proof, clientIp);
 
-        // 2. Evaluate user permission & Burn-After-Reading consumption
+        // 3. Evaluate user permission & Burn-After-Reading consumption
         permissionService.evaluateAndConsumeAccess(document, user, true, clientIp);
 
         byte[] fileBytes = fileStorageService.loadFileBytes(document.getFilePath());
@@ -140,8 +149,10 @@ public class DocumentService {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new AccessDeniedException("Access Denied: Document not found."));
 
-        String effectiveRole = permissionService.evaluateAndConsumeAccess(document, user, false, clientIp);
-        if (!"OWNER".equals(effectiveRole) && !"EDIT".equals(effectiveRole)) {
+        // Real-time authorization before any field is mutated: owner, live ADMIN, or an active
+        // EDIT grant. READ-only recipients are rejected here with 403 and an ACCESS_DENIED row.
+        String effectiveRole = permissionService.requireLiveAccess(document, user, PermissionLevel.EDIT, clientIp);
+        if (!"OWNER".equals(effectiveRole) && !"EDIT".equals(effectiveRole) && !"ADMIN".equals(effectiveRole)) {
             Map<String, Object> details = new HashMap<>();
             details.put("reason", "User attempted to update document without EDIT/OWNER permission");
             auditLogService.logEvent(user, user.getEmail(), AuditAction.ACCESS_DENIED, documentId, clientIp, AuditStatus.FAILURE, details);
@@ -150,6 +161,8 @@ public class DocumentService {
 
         // Action-time face gate for the sensitive EDIT action.
         faceGateService.enforce(user, documentId, FaceEnrollmentService.ACTION_EDIT, proof, clientIp);
+
+        Map<String, Object> preState = auditSnapshotService.documentSnapshot(document);
 
         if (newTitle != null && !newTitle.isBlank()) {
             document.setTitle(newTitle.trim());
@@ -163,7 +176,7 @@ public class DocumentService {
         Map<String, Object> details = new HashMap<>();
         details.put("updatedTitle", saved.getTitle());
         details.put("updatedCategory", saved.getCategory());
-        auditLogService.logEvent(user, user.getEmail(), AuditAction.EDIT, documentId, clientIp, AuditStatus.SUCCESS, details);
+        auditLogService.logEvent(user, user.getEmail(), AuditAction.EDIT, documentId, clientIp, AuditStatus.SUCCESS, details, preState, auditSnapshotService.documentSnapshot(saved));
 
         return toDocumentResponse(saved, effectiveRole, null);
     }
@@ -182,11 +195,13 @@ public class DocumentService {
         }
 
         fileStorageService.deleteFile(document.getFilePath());
+        Map<String, Object> preState = auditSnapshotService.documentSnapshot(document);
         documentRepository.delete(document);
 
         Map<String, Object> details = new HashMap<>();
         details.put("deletedTitle", document.getTitle());
-        auditLogService.logEvent(user, user.getEmail(), AuditAction.DELETE, documentId, clientIp, AuditStatus.SUCCESS, details);
+        details.put("deletedCategory", document.getCategory());
+        auditLogService.logEvent(user, user.getEmail(), AuditAction.DELETE, documentId, clientIp, AuditStatus.SUCCESS, details, preState, null);
     }
 
     @Transactional(readOnly = true)

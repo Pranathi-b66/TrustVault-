@@ -12,6 +12,7 @@ import com.trustvault.repository.AuditLogRepository;
 import com.trustvault.repository.DocumentRepository;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.JwtTokenProvider;
+import com.trustvault.service.BiometricChallengeService;
 import com.trustvault.service.DocumentService;
 import com.trustvault.service.FaceEnrollmentService;
 import com.trustvault.service.PermissionService;
@@ -60,6 +61,9 @@ public class IdorProtectionIntegrationTest {
     @Autowired
     private FaceEnrollmentService faceEnrollmentService;
 
+    @Autowired
+    private BiometricChallengeService biometricChallengeService;
+
     private User userA;
     private User userB;
     private String tokenA;
@@ -105,14 +109,21 @@ public class IdorProtectionIntegrationTest {
     }
 
     /**
-     * Runs a realistic re-scan through the similarity matcher and returns the short-lived action
-     * token it mints. This is the only way to satisfy the face gate now that no bypass exists.
+     * Runs a realistic re-scan through the matcher and returns the short-lived action token it
+     * mints. Every verification has to redeem a fresh timestamped challenge, exactly like the
+     * browser does before opening the webcam modal.
      */
     private String mintActionToken(User user, String documentId, String action) {
         FaceVerificationResponse response = faceEnrollmentService.verifyForAction(
-                user, documentId, action, FaceFixtures.rescan(user.getEmail()), "10.0.0.1");
+                user, documentId, action, FaceFixtures.rescan(user.getEmail()),
+                challengeFor(user, documentId, action), "10.0.0.1");
         assertTrue(response.isVerified(), "Face verification should have succeeded for " + user.getEmail());
         return response.getFaceToken();
+    }
+
+    /** Issues a single-use FaceID challenge bound to this user, document and action. */
+    private String challengeFor(User user, String documentId, String action) {
+        return biometricChallengeService.issue(user, documentId, action, "10.0.0.1").getChallengeToken();
     }
 
     @Test
@@ -199,7 +210,8 @@ public class IdorProtectionIntegrationTest {
     void userACanDownloadWithInlineFaceDescriptor() throws Exception {
         mockMvc.perform(get("/api/documents/" + docA.getId() + "/download")
                         .header("Authorization", "Bearer " + tokenA)
-                        .header("X-Face-Descriptor", FaceFixtures.json(FaceFixtures.rescan(userA.getEmail()))))
+                        .header("X-Face-Descriptor", FaceFixtures.json(FaceFixtures.rescan(userA.getEmail())))
+                        .header("X-Face-Challenge", challengeFor(userA, docA.getId(), FaceEnrollmentService.ACTION_DOWNLOAD)))
                 .andExpect(status().isOk());
     }
 
@@ -211,7 +223,8 @@ public class IdorProtectionIntegrationTest {
 
         mockMvc.perform(get("/api/documents/" + docA.getId() + "/download")
                         .header("Authorization", "Bearer " + tokenA)
-                        .header("X-Face-Descriptor", FaceFixtures.json(FaceFixtures.differentFace("an-unrelated-person"))))
+                        .header("X-Face-Descriptor", FaceFixtures.json(FaceFixtures.differentFace("an-unrelated-person")))
+                        .header("X-Face-Challenge", challengeFor(userA, docA.getId(), FaceEnrollmentService.ACTION_DOWNLOAD)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FACE_MISMATCH"));
 

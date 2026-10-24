@@ -60,10 +60,27 @@ public class FaceEnrollmentService {
     private final AuditLogService auditLogService;
     private final AnomalyDetectionService anomalyDetectionService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final BiometricChallengeService biometricChallengeService;
 
     /** Similarity required to accept a live capture; also used to detect a duplicate enrollment. */
     @Value("${trustvault.face.match-threshold:0.40}")
     private double matchThreshold;
+
+    /**
+     * Hard ceiling for identity matching: the euclidean distance between the live probe and the
+     * enrolled template must be {@code <= 0.60}. The property can only tighten this value; the
+     * constant is never relaxed at runtime.
+     *
+     * <p>0.60 is the operating point of the browser model, not a round number: FaceRecognitionNet
+     * places two captures of one face 0.4-0.6 apart, so anything below 0.5 rejects genuine users
+     * (measured live at 0.513 and 0.587). It is also the distance the duplicate-enrollment scan
+     * already treats as one identity (similarity 0.40), so the two rules now agree instead of
+     * calling two captures the same person on enrollment and different people on verification.</p>
+     */
+    public static final double MAX_VERIFY_DISTANCE = 0.60d;
+
+    @Value("${trustvault.face.verify-max-distance:0.60}")
+    private double configuredVerifyMaxDistance;
 
     /** Upper bound on enrollments inspected during the duplicate scan. */
     @Value("${trustvault.face.max-candidates:5000}")
@@ -78,13 +95,15 @@ public class FaceEnrollmentService {
                                  FaceDescriptorCipher descriptorCipher,
                                  AuditLogService auditLogService,
                                  AnomalyDetectionService anomalyDetectionService,
-                                 JwtTokenProvider jwtTokenProvider) {
+                                 JwtTokenProvider jwtTokenProvider,
+                                 BiometricChallengeService biometricChallengeService) {
         this.faceEnrollmentRepository = faceEnrollmentRepository;
         this.faceMatcher = faceMatcher;
         this.descriptorCipher = descriptorCipher;
         this.auditLogService = auditLogService;
         this.anomalyDetectionService = anomalyDetectionService;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.biometricChallengeService = biometricChallengeService;
     }
 
     // =====================================================================
@@ -285,9 +304,10 @@ public class FaceEnrollmentService {
                                                     String documentId,
                                                     String requestedAction,
                                                     List<Double> descriptor,
+                                                    String challengeToken,
                                                     String clientIp) {
         FaceDescriptor probe = FaceDescriptor.of(descriptor, descriptorSize);
-        return verify(user, documentId, requestedAction, probe, clientIp);
+        return verify(user, documentId, requestedAction, probe, challengeToken, clientIp);
     }
 
     /** Inline-proof entry point: the descriptor arrives as a JSON array (header/query value). */
@@ -296,17 +316,30 @@ public class FaceEnrollmentService {
                                                     String documentId,
                                                     String requestedAction,
                                                     String descriptorJson,
+                                                    String challengeToken,
                                                     String clientIp) {
         FaceDescriptor probe = FaceDescriptor.parse(descriptorJson, descriptorSize);
-        return verify(user, documentId, requestedAction, probe, clientIp);
+        return verify(user, documentId, requestedAction, probe, challengeToken, clientIp);
     }
 
     private FaceVerificationResponse verify(User user,
                                             String documentId,
                                             String requestedAction,
                                             FaceDescriptor probe,
+                                            String challengeToken,
                                             String clientIp) {
         String action = normaliseAction(requestedAction);
+
+        // 0. Replay protection. The descriptor is a durable credential, not a nonce: a recorded
+        //    verify-face body would stay valid indefinitely. The challenge is timestamped, bound to
+        //    user+document+action and burned on first use, so a captured body is worthless on
+        //    replay. This runs before any template work.
+        BiometricChallengeService.ChallengeDecision challenge =
+                biometricChallengeService.consume(user, documentId, action, challengeToken, clientIp);
+        if (!challenge.valid()) {
+            deny(user, documentId, action, clientIp, challenge.code(), challenge.message(), 0d,
+                    "FACE_CHALLENGE_REJECTED");
+        }
 
         FaceEnrollment enrollment = faceEnrollmentRepository.findByUserId(user.getId())
                 .orElse(null);
@@ -341,15 +374,23 @@ public class FaceEnrollmentService {
                     anomalyDetectionService.currentFailureCount(clientIp, user.getEmail()));
         }
 
+        // Identity decision on the raw euclidean distance against the account's own template:
+        // accept only d <= 0.60, the model's own intra-person operating range. The liveness pass
+        // and the single-use challenge are what make this ceiling safe; a tighter distance only
+        // locks genuine users out of their own documents.
+        double rawDistance = faceMatcher.distance(probe, reference);
+        double distance = round(rawDistance);
+        double maxDistance = getVerifyMaxDistance();
         double similarity = round(faceMatcher.similarity(probe, reference));
 
-        if (similarity < matchThreshold) {
+        if (rawDistance > maxDistance) {
             Map<String, Object> details = new HashMap<>();
             details.put("event", "FACE_MATCH_FAILED");
             details.put("action", action);
             details.put("targetDocumentId", documentId);
+            details.put("matchDistance", distance);
+            details.put("distanceThreshold", maxDistance);
             details.put("matchScore", similarity);
-            details.put("matchThreshold", matchThreshold);
             details.put("userEmail", user.getEmail());
             auditLogService.logEvent(user, user.getEmail(), AuditAction.ACCESS_DENIED, documentId, clientIp,
                     AuditStatus.FAILURE, details);
@@ -358,8 +399,10 @@ public class FaceEnrollmentService {
 
             throw new FaceVerificationException(
                     FaceVerificationException.MISMATCH,
-                    "Face does not match the descriptor enrolled for this account. " + action + " blocked.",
-                    similarity,
+                    "Face does not match the descriptor enrolled for this account (distance "
+                            + String.format(Locale.ROOT, "%.3f", distance) + " > " + maxDistance
+                            + "). " + action + " blocked.",
+                    distance,
                     anomalyDetectionService.currentFailureCount(clientIp, user.getEmail()));
         }
 
@@ -369,9 +412,11 @@ public class FaceEnrollmentService {
         Map<String, Object> details = new HashMap<>();
         details.put("event", "FACE_ACTION_VERIFIED");
         details.put("action", action);
+        details.put("matchDistance", distance);
+        details.put("distanceThreshold", maxDistance);
         details.put("matchScore", similarity);
-        details.put("matchThreshold", matchThreshold);
         details.put("algorithm", enrollment.getAlgorithmVersion());
+        details.put("challengeId", challenge.challengeId());
         auditLogService.logEvent(user, user.getEmail(), AuditAction.READ, documentId, clientIp,
                 AuditStatus.SUCCESS, details);
 
@@ -380,12 +425,20 @@ public class FaceEnrollmentService {
         response.setAction(action);
         response.setDocumentId(documentId);
         response.setScore(similarity);
-        response.setThreshold(matchThreshold);
+        response.setDistance(distance);
+        response.setThreshold(maxDistance);
+        response.setMetric("EUCLIDEAN_DISTANCE");
         response.setFaceToken(faceToken);
         response.setExpiresInSeconds(120L);
         response.setAlgorithm(enrollment.getAlgorithmVersion());
         response.setVerifiedAt(Instant.now());
         return response;
+    }
+
+    /** Effective identity threshold: configuration can tighten 0.60 but never loosen it. */
+    public double getVerifyMaxDistance() {
+        double configured = configuredVerifyMaxDistance > 0 ? configuredVerifyMaxDistance : MAX_VERIFY_DISTANCE;
+        return Math.max(0.05d, Math.min(configured, MAX_VERIFY_DISTANCE));
     }
 
     // =====================================================================
@@ -449,23 +502,40 @@ public class FaceEnrollmentService {
      */
     public void denyAccess(User user, String documentId, String action, String clientIp,
                            String code, String reason, double score) {
+        deny(user, documentId, action, clientIp, code, reason, score, "FACE_PROOF_MISSING");
+    }
+
+    /**
+     * Single denial path: one audit event pair, one exception, one anomaly count - whatever the
+     * reason (missing proof, rejected challenge, failed match).
+     */
+    private void deny(User user, String documentId, String action, String clientIp,
+                      String code, String reason, double score, String event) {
         Map<String, Object> details = new HashMap<>();
-        details.put("event", "FACE_PROOF_MISSING");
+        details.put("event", event);
         details.put("verificationCode", code);
         details.put("action", action);
         details.put("targetDocumentId", documentId);
         details.put("reason", reason);
         details.put("matchScore", round(score));
-        details.put("matchThreshold", matchThreshold);
-        details.put("userEmail", user.getEmail());
+        details.put("distanceThreshold", getVerifyMaxDistance());
+        details.put("userEmail", user != null ? user.getEmail() : "unknown");
 
-        auditLogService.logEvent(user, user.getEmail(), AuditAction.ACCESS_DENIED, documentId, clientIp,
+        String email = user != null ? user.getEmail() : "unknown";
+        auditLogService.logEvent(user, email, AuditAction.ACCESS_DENIED, documentId, clientIp,
                 AuditStatus.FAILURE, details);
-        auditLogService.logEvent(user, user.getEmail(), AuditAction.SECURITY_ALERT, documentId, clientIp,
-                AuditStatus.FAILURE, details);
+        // A nonce that simply aged out is a timing artifact, not an attack: the client now mints
+        // the challenge after the capture and submits it immediately, so only clock skew beyond
+        // the skew allowance or a stalled tab can expire one. The refusal is still audited, but
+        // SECURITY_ALERT is reserved for what really indicates replay: a spent, re-bound or
+        // mismatched token.
+        if (!FaceVerificationException.CHALLENGE_EXPIRED.equals(code)) {
+            auditLogService.logEvent(user, email, AuditAction.SECURITY_ALERT, documentId, clientIp,
+                    AuditStatus.FAILURE, details);
+        }
 
         throw new FaceVerificationException(code, reason,
-                round(score), anomalyDetectionService.currentFailureCount(clientIp, user.getEmail()));
+                round(score), anomalyDetectionService.currentFailureCount(clientIp, email));
     }
 
     private static double round(double value) {

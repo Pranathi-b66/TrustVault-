@@ -7,21 +7,24 @@ package com.trustvault.face;
  *   <li>{@code actionToken} - a short-lived JWT minted by a successful
  *       {@code POST /api/auth/biometric/verify-face};</li>
  *   <li>{@code faceDescriptor} - a freshly captured embedding (JSON array) verified inline by the
- *       download/edit endpoint itself.</li>
+ *       download/edit endpoint itself;</li>
+ *   <li>{@code challengeToken} - the timestamped, single-use nonce issued before the capture. It
+ *       is mandatory whenever {@code faceDescriptor} is supplied, because without it the same
+ *       capture could be replayed indefinitely.</li>
  * </ul>
  */
-public record FaceProof(String actionToken, String faceDescriptor) {
+public record FaceProof(String actionToken, String faceDescriptor, String challengeToken) {
 
-    public static FaceProof of(String actionToken, String faceDescriptor) {
-        return new FaceProof(trimToNull(actionToken), trimToNull(faceDescriptor));
+    public static FaceProof of(String actionToken, String faceDescriptor, String challengeToken) {
+        return new FaceProof(trimToNull(actionToken), trimToNull(faceDescriptor), trimToNull(challengeToken));
     }
 
     public static FaceProof empty() {
-        return new FaceProof(null, null);
+        return new FaceProof(null, null, null);
     }
 
     public boolean isEmpty() {
-        return actionToken == null && faceDescriptor == null;
+        return actionToken == null && faceDescriptor == null && challengeToken == null;
     }
 
     private static String trimToNull(String value) {

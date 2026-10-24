@@ -74,6 +74,39 @@ public class JwtTokenProvider {
                 .compact();
     }
 
+    /**
+     * Mints a timestamped, single-use challenge for the webcam FaceID flow. The browser must
+     * obtain one via {@code POST /api/auth/biometric/challenge} before opening the camera and
+     * present it with the descriptor; the server refuses to match a descriptor whose challenge is
+     * missing, expired (older than the TTL), already consumed, or bound to a different
+     * user/document/action. That is what makes a captured {@code verify-face} body unusable as a
+     * replay, even inside the TTL window.
+     *
+     * @param ttlSeconds lifetime of the challenge; callers clamp this to the 30 s policy ceiling
+     */
+    public String generateBiometricChallengeToken(String userId, String email, String challengeId,
+                                                  String documentId, String action, long ttlSeconds) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + ttlSeconds * 1000L);
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("email", email);
+        claims.put("challengeId", challengeId);
+        claims.put("documentId", documentId);
+        claims.put("action", action);
+        claims.put("scope", "BIOMETRIC_CHALLENGE");
+
+        return Jwts.builder()
+                .claims(claims)
+                .id(challengeId)
+                .subject(email)
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(key)
+                .compact();
+    }
+
     public boolean validateToken(String authToken) {
         try {
             Jwts.parser().verifyWith(key).build().parseSignedClaims(authToken);

@@ -88,6 +88,8 @@ public class DocumentController {
             @RequestHeader(value = "X-Face-Token", required = false) String faceTokenHeader,
             @RequestParam(value = "faceDescriptor", required = false) String faceDescriptorParam,
             @RequestHeader(value = "X-Face-Descriptor", required = false) String faceDescriptorHeader,
+            @RequestParam(value = "faceChallenge", required = false) String faceChallengeParam,
+            @RequestHeader(value = "X-Face-Challenge", required = false) String faceChallengeHeader,
             @AuthenticationPrincipal UserPrincipal principal,
             HttpServletRequest request) {
 
@@ -96,7 +98,8 @@ public class DocumentController {
 
         FaceProof proof = FaceProof.of(
                 firstNonBlank(faceTokenParam, faceTokenHeader),
-                firstNonBlank(faceDescriptorParam, faceDescriptorHeader));
+                firstNonBlank(faceDescriptorParam, faceDescriptorHeader),
+                firstNonBlank(faceChallengeParam, faceChallengeHeader));
 
         DocumentService.DownloadPayload payload = documentService.downloadDocument(
                 id, proof, user, getClientIp(request));
@@ -115,6 +118,8 @@ public class DocumentController {
             @RequestHeader(value = "X-Face-Token", required = false) String faceTokenHeader,
             @RequestParam(value = "faceDescriptor", required = false) String faceDescriptorParam,
             @RequestHeader(value = "X-Face-Descriptor", required = false) String faceDescriptorHeader,
+            @RequestParam(value = "faceChallenge", required = false) String faceChallengeParam,
+            @RequestHeader(value = "X-Face-Challenge", required = false) String faceChallengeHeader,
             @AuthenticationPrincipal UserPrincipal principal,
             HttpServletRequest request) {
 
@@ -126,7 +131,8 @@ public class DocumentController {
 
         FaceProof proof = FaceProof.of(
                 firstNonBlank(faceTokenParam, faceTokenHeader, body.get("faceToken")),
-                firstNonBlank(faceDescriptorParam, faceDescriptorHeader, body.get("faceDescriptor")));
+                firstNonBlank(faceDescriptorParam, faceDescriptorHeader, body.get("faceDescriptor")),
+                firstNonBlank(faceChallengeParam, faceChallengeHeader, body.get("faceChallenge")));
 
         DocumentResponse resp = documentService.updateDocument(
                 id, title, category, proof, user, getClientIp(request));

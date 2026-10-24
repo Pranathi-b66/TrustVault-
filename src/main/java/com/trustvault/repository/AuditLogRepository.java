@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface AuditLogRepository extends JpaRepository<AuditLog, String> {
@@ -19,6 +20,13 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, String> {
     List<AuditLog> findTop100ByOrderByTimestampDesc();
 
     List<AuditLog> findByActionOrderByTimestampDesc(AuditAction action);
+
+    /**
+     * Loads one entry together with its actor so the forensic diff can expose the administrator's
+     * user id without a lazy-initialization dependency on the open-in-view session.
+     */
+    @Query("SELECT a FROM AuditLog a LEFT JOIN FETCH a.user WHERE a.id = :id")
+    Optional<AuditLog> findByIdWithUser(@Param("id") String id);
 
     @Query("SELECT COUNT(a) FROM AuditLog a WHERE a.ipAddress = :ipAddress AND a.action = :action AND a.status = :status AND a.timestamp >= :since")
     long countRecentAccessDeniedByIp(@Param("ipAddress") String ipAddress,

@@ -1,6 +1,6 @@
 # TrustVault AI & Architectural Prompts Blueprint
 
-This document details the system instructions, architectural design prompts, and security guardrail prompts utilized to design, build, and verify **TrustVault**.
+This document details the system instructions, architectural design prompts, and security guardrail prompts utilized to design, build, and verify **TrustVault**, the entry for the Snovasys Fresher Hiring Challenge 2026.
 
 ---
 
@@ -135,3 +135,63 @@ Remove all standard WebAuthn/passkey and fingerprint implementations and replace
 4. **Zero Silent Fallback:**
    - Explicitly bypass OS/browser credential auto-fill, requiring active physical presentation to the webcam for every sensitive action.
 ```
+
+---
+
+## 7. Core Biometric & Authorization Hardening Prompts
+
+### Prompt 7.1: WebCam FaceID Liveness & Distance Threshold Tuning
+> **Prompt:**
+> "Act as a Senior Security Engineer. Upgrade the client-side webcam FaceID authentication system in TrustVault:
+> 1. Implement Client-Side Liveness Detection: Integrate motion variance checks (e.g., optical flow / blink / head movement prompts) in `face-api.js` / TensorFlow.js prior to descriptor extraction to prevent presentation attacks using static photos or screen displays.
+> 2. Fine-Tune Distance Thresholding: Enforce a strict server-side Euclidean distance matching threshold ($d \le 0.40$) on `POST /api/auth/biometric/verify-face`.
+> 3. Real-Time UI Feedback: Provide immediate environmental guidance on the webcam overlay ('Adjust lighting', 'Center face in frame') if frame confidence is low."
+
+---
+
+### Prompt 7.2: Timestamped Cryptographic Challenge Nonces (Anti-Replay)
+> **Prompt:**
+> "Prevent replay attacks on biometric vector payloads:
+> 1. Expose `POST /api/auth/biometric/challenge` to issue a short-lived, single-use cryptographic challenge nonce valid for $< 30$ seconds.
+> 2. Mandate that `POST /api/auth/biometric/verify-face` submit this nonce alongside the 128-float facial vector.
+> 3. Reject any expired, missing, or previously consumed nonces with `403 Forbidden` and log a `REPLAY_ATTEMPT_DETECTED` anomaly event."
+
+---
+
+### Prompt 7.3: Real-Time Middleware Permission Check (IDOR & Revocation Patch)
+> **Prompt:**
+> "Fix potential IDOR and stale authorization flaws on document endpoints:
+> 1. Ensure `GET /api/documents/{id}/download` and `PUT /api/documents/{id}` NEVER rely solely on cached JWT claims or initial session state.
+> 2. Execute a mandatory real-time database query on every transaction verifying that `authenticated_user_id` is the document `owner_id`, an active `ADMIN`, or possesses an explicit active entry in `shared_permissions`.
+> 3. Immediately return `403 Forbidden` if permissions were revoked mid-session prior to streaming file bytes."
+
+---
+
+## 8. Advanced Admin Security & Forensics Prompts
+
+### Prompt 8.1: Emergency Global Kill Switch
+> **Prompt:**
+> "Implement a high-priority administrative control endpoint `POST /api/admin/system/lockdown`:
+> 1. When activated (`SYSTEM_LOCKDOWN = true`), maintain an atomic global flag in backend state.
+> 2. Intercept all incoming non-Admin requests for document downloads, edits, and uploads, returning `503 Service Unavailable` ('System is under administrative security lockdown').
+> 3. Keep administrative controls active so admins can isolate threats and manage system state. Log a high-severity `SYSTEM_LOCKDOWN_TRIGGERED` WORM audit event."
+
+---
+
+### Prompt 8.2: Action Replay Forensic System (Before/After State Diffing)
+> **Prompt:**
+> "Build an Action Replay Forensic System for compliance and non-repudiation:
+> 1. Update the `audit_logs` schema to store JSON structures for `pre_state` and `post_state`.
+> 2. On any administrative mutation (role changes, user deletions, policy updates), capture resource snapshots before and immediately after execution.
+> 3. Expose `GET /api/admin/audit/{id}/diff` and build a side-by-side visual diff modal in the Admin UI showing highlighted modifications (added, removed, or altered fields)."
+
+---
+
+## 9. Professional UI Design System Prompt
+
+### Prompt 9.1: Enterprise White & Royal Blue Design System
+> **Prompt:**
+> "Redesign the TrustVault UI into a sleek, professional enterprise platform:
+> 1. Palette: White background (`#FFFFFF`), neutral subtle cards (`#F8FAFC`), soft borders (`#E2E8F0`), primary accent Royal/Navy Blue (`#1E40AF` / `#2563EB`), emerald green for security verification (`#10B981`), and crimson for alerts (`#EF4444`).
+> 2. FaceID Modal: Frosted glass overlay with a glowing royal blue oval scanner guide and real-time status text.
+> 3. Admin Tools: Clean side-by-side green/red diff viewer for Action Replay and a high-visibility toggle switch for the Emergency Kill Switch."

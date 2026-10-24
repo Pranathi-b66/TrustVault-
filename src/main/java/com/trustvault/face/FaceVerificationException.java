@@ -10,6 +10,12 @@ public class FaceVerificationException extends RuntimeException {
     public static final String MISMATCH = "FACE_MISMATCH";
     public static final String PROOF_REQUIRED = "FACE_PROOF_REQUIRED";
 
+    /** Replay protection: the timestamped challenge was absent, stale, forged or already spent. */
+    public static final String CHALLENGE_REQUIRED = "FACE_CHALLENGE_REQUIRED";
+    public static final String CHALLENGE_EXPIRED = "FACE_CHALLENGE_EXPIRED";
+    public static final String CHALLENGE_REUSED = "FACE_CHALLENGE_REUSED";
+    public static final String CHALLENGE_MISMATCH = "FACE_CHALLENGE_MISMATCH";
+
     private final String code;
     private final double score;
     private final int anomalyCount;

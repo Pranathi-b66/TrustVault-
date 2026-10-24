@@ -66,6 +66,15 @@ const API = {
                 error.code = errData.code || null;
                 error.anomalyCount = errData.anomalyCount;
                 error.matchScore = errData.matchScore;
+
+                // Global kill switch: surface the frozen perimeter to every caller (including the
+                // non-admin views that can never read the lockdown status endpoint themselves).
+                if (res.status === 503 && errData.code === 'SYSTEM_LOCKDOWN') {
+                    window.dispatchEvent(new CustomEvent('system-lockdown', {
+                        detail: { message: errData.message }
+                    }));
+                }
+
                 throw error;
             }
 
@@ -185,10 +194,19 @@ const API = {
         });
     },
 
-    async verifyFace(documentId, action, descriptor) {
+    // Replay protection: every action-time verification is bound to a signed, timestamped
+    // challenge that lives for at most 30 seconds and can be redeemed exactly once.
+    async getBiometricChallenge(documentId, action) {
+        return await this.request('/api/auth/biometric/challenge', {
+            method: 'POST',
+            body: JSON.stringify({ documentId, action })
+        });
+    },
+
+    async verifyFace(documentId, action, descriptor, challengeToken) {
         return await this.request('/api/auth/biometric/verify-face', {
             method: 'POST',
-            body: JSON.stringify({ documentId, action, descriptor })
+            body: JSON.stringify({ documentId, action, descriptor, challengeToken })
         });
     },
 
@@ -245,5 +263,29 @@ const API = {
 
     async getSecurityAlerts() {
         return await this.request('/api/admin/audit-logs/alerts');
+    },
+
+    // Emergency Global Kill Switch
+    async getLockdownStatus() {
+        return await this.request('/api/admin/system/lockdown');
+    },
+
+    async setLockdown(enabled, reason) {
+        return await this.request('/api/admin/system/lockdown', {
+            method: 'POST',
+            body: JSON.stringify({ enabled, reason })
+        });
+    },
+
+    // Action Replay forensics
+    async getAuditDiff(auditId) {
+        return await this.request(`/api/admin/audit/${encodeURIComponent(auditId)}/diff`);
+    },
+
+    async changeUserRole(userId, role) {
+        return await this.request(`/api/admin/users/${userId}/role`, {
+            method: 'PUT',
+            body: JSON.stringify({ role })
+        });
     }
 };

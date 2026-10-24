@@ -1,16 +1,16 @@
 package com.trustvault.controller;
 
+import com.trustvault.dto.RoleUpdateRequest;
 import com.trustvault.dto.UserResponse;
 import com.trustvault.entity.AuditAction;
-import com.trustvault.entity.AuditStatus;
 import com.trustvault.entity.User;
-import com.trustvault.entity.UserStatus;
 import com.trustvault.repository.AuditLogRepository;
 import com.trustvault.repository.DocumentRepository;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.UserPrincipal;
-import com.trustvault.service.AuditLogService;
+import com.trustvault.service.AdminUserService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -26,16 +26,16 @@ public class AdminController {
     private final UserRepository userRepository;
     private final DocumentRepository documentRepository;
     private final AuditLogRepository auditLogRepository;
-    private final AuditLogService auditLogService;
+    private final AdminUserService adminUserService;
 
     public AdminController(UserRepository userRepository,
                            DocumentRepository documentRepository,
                            AuditLogRepository auditLogRepository,
-                           AuditLogService auditLogService) {
+                           AdminUserService adminUserService) {
         this.userRepository = userRepository;
         this.documentRepository = documentRepository;
         this.auditLogRepository = auditLogRepository;
-        this.auditLogService = auditLogService;
+        this.adminUserService = adminUserService;
     }
 
     private String getClientIp(HttpServletRequest request) {
@@ -46,12 +46,17 @@ public class AdminController {
         return ip;
     }
 
+    private UserResponse toResponse(User user) {
+        return new UserResponse(user.getId(), user.getEmail(), user.getFullName(),
+                user.getRole(), user.getStatus(), user.getCreatedAt());
+    }
+
     @GetMapping("/users")
     public ResponseEntity<List<UserResponse>> getAllUsers() {
         List<User> users = userRepository.findAllByOrderByCreatedAtDesc();
         List<UserResponse> list = new ArrayList<>();
         for (User u : users) {
-            list.add(new UserResponse(u.getId(), u.getEmail(), u.getFullName(), u.getRole(), u.getStatus(), u.getCreatedAt()));
+            list.add(toResponse(u));
         }
         return ResponseEntity.ok(list);
     }
@@ -62,21 +67,8 @@ public class AdminController {
             @AuthenticationPrincipal UserPrincipal adminPrincipal,
             HttpServletRequest request) {
 
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("User not found: " + id));
-
-        user.setStatus(UserStatus.INACTIVE);
-        User saved = userRepository.save(user);
-
-        User admin = userRepository.findById(adminPrincipal.getId()).orElse(null);
-        Map<String, Object> details = new HashMap<>();
-        details.put("action", "INSTANT_OFFBOARDING_TRIGGERED");
-        details.put("targetUserEmail", user.getEmail());
-        details.put("targetUserId", user.getId());
-
-        auditLogService.logEvent(admin, adminPrincipal.getEmail(), AuditAction.ACCOUNT_DEACTIVATED, null, getClientIp(request), AuditStatus.SUCCESS, details);
-
-        return ResponseEntity.ok(new UserResponse(saved.getId(), saved.getEmail(), saved.getFullName(), saved.getRole(), saved.getStatus(), saved.getCreatedAt()));
+        User saved = adminUserService.deactivateUser(id, adminPrincipal.getId(), getClientIp(request));
+        return ResponseEntity.ok(toResponse(saved));
     }
 
     @PutMapping("/users/{id}/activate")
@@ -85,20 +77,24 @@ public class AdminController {
             @AuthenticationPrincipal UserPrincipal adminPrincipal,
             HttpServletRequest request) {
 
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("User not found: " + id));
+        User saved = adminUserService.activateUser(id, adminPrincipal.getId(), getClientIp(request));
+        return ResponseEntity.ok(toResponse(saved));
+    }
 
-        user.setStatus(UserStatus.ACTIVE);
-        User saved = userRepository.save(user);
+    /**
+     * Role changes are captured with before/after snapshots so the Action Replay inspector can
+     * show exactly which identity moved between which privilege tier.
+     */
+    @PutMapping("/users/{id}/role")
+    public ResponseEntity<UserResponse> changeRole(
+            @PathVariable("id") String id,
+            @Valid @RequestBody RoleUpdateRequest request,
+            @AuthenticationPrincipal UserPrincipal adminPrincipal,
+            HttpServletRequest httpRequest) {
 
-        User admin = userRepository.findById(adminPrincipal.getId()).orElse(null);
-        Map<String, Object> details = new HashMap<>();
-        details.put("action", "ACCOUNT_ACTIVATED");
-        details.put("targetUserEmail", user.getEmail());
-
-        auditLogService.logEvent(admin, adminPrincipal.getEmail(), AuditAction.EDIT, null, getClientIp(request), AuditStatus.SUCCESS, details);
-
-        return ResponseEntity.ok(new UserResponse(saved.getId(), saved.getEmail(), saved.getFullName(), saved.getRole(), saved.getStatus(), saved.getCreatedAt()));
+        User saved = adminUserService.changeRole(id, adminPrincipal.getId(), request.getRole(),
+                getClientIp(httpRequest));
+        return ResponseEntity.ok(toResponse(saved));
     }
 
     @GetMapping("/stats")

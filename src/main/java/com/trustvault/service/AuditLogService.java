@@ -7,6 +7,8 @@ import com.trustvault.entity.AuditLog;
 import com.trustvault.entity.AuditStatus;
 import com.trustvault.entity.User;
 import com.trustvault.repository.AuditLogRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,10 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class AuditLogService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuditLogService.class);
 
     private final AuditLogRepository auditLogRepository;
     private final AnomalyDetectionService anomalyDetectionService;
@@ -38,7 +43,18 @@ public class AuditLogService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public AuditLog logEvent(User user, String userEmail, AuditAction action, String documentId,
                              String ipAddress, AuditStatus status, Map<String, Object> detailsMap) {
-        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap);
+        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap, null, null);
+    }
+
+    /**
+     * Writes the row in its own transaction together with the before/after resource snapshots
+     * that make the entry replayable in the forensic inspector.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public AuditLog logEvent(User user, String userEmail, AuditAction action, String documentId,
+                             String ipAddress, AuditStatus status, Map<String, Object> detailsMap,
+                             Map<String, Object> preState, Map<String, Object> postState) {
+        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap, preState, postState);
     }
 
     /**
@@ -50,24 +66,31 @@ public class AuditLogService {
     @Transactional(propagation = Propagation.REQUIRED)
     public AuditLog logEventInTransaction(User user, String userEmail, AuditAction action, String documentId,
                                           String ipAddress, AuditStatus status, Map<String, Object> detailsMap) {
-        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap);
+        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap, null, null);
+    }
+
+    /**
+     * Caller-transaction variant that also persists before/after snapshots atomically with the
+     * mutation being audited.
+     */
+    @Transactional(propagation = Propagation.REQUIRED)
+    public AuditLog logEventInTransaction(User user, String userEmail, AuditAction action, String documentId,
+                                          String ipAddress, AuditStatus status, Map<String, Object> detailsMap,
+                                          Map<String, Object> preState, Map<String, Object> postState) {
+        return persistEvent(user, userEmail, action, documentId, ipAddress, status, detailsMap, preState, postState);
     }
 
     private AuditLog persistEvent(User user, String userEmail, AuditAction action, String documentId,
-                                  String ipAddress, AuditStatus status, Map<String, Object> detailsMap) {
-        String jsonDetails = null;
-        if (detailsMap != null && !detailsMap.isEmpty()) {
-            try {
-                jsonDetails = objectMapper.writeValueAsString(detailsMap);
-            } catch (JsonProcessingException e) {
-                jsonDetails = "{}";
-            }
-        }
+                                  String ipAddress, AuditStatus status, Map<String, Object> detailsMap,
+                                  Map<String, Object> preState, Map<String, Object> postState) {
+        String jsonDetails = serialize(detailsMap);
+        String jsonPreState = serialize(preState);
+        String jsonPostState = serialize(postState);
 
         String effectiveEmail = (user != null) ? user.getEmail() : (userEmail != null ? userEmail : "anonymous");
         String effectiveIp = (ipAddress != null && !ipAddress.isBlank()) ? ipAddress : "127.0.0.1";
 
-        AuditLog log = new AuditLog(
+        AuditLog auditLog = new AuditLog(
                 UUID.randomUUID().toString(),
                 user,
                 effectiveEmail,
@@ -76,10 +99,12 @@ public class AuditLogService {
                 effectiveIp,
                 status,
                 jsonDetails,
+                jsonPreState,
+                jsonPostState,
                 Instant.now()
         );
 
-        AuditLog saved = auditLogRepository.save(log);
+        AuditLog saved = auditLogRepository.save(auditLog);
 
         if (action == AuditAction.ACCESS_DENIED) {
             anomalyDetectionService.recordAccessDenied(effectiveIp, effectiveEmail, documentId);
@@ -88,6 +113,25 @@ public class AuditLogService {
         }
 
         return saved;
+    }
+
+    private String serialize(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(state);
+        } catch (JsonProcessingException e) {
+            // A broken snapshot must never suppress the audit row itself; the row still carries
+            // the action, actor, IP and human-readable details.
+            log.error("Unable to serialize audit state snapshot", e);
+            return null;
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<AuditLog> getLog(String id) {
+        return auditLogRepository.findByIdWithUser(id);
     }
 
     @Transactional(readOnly = true)

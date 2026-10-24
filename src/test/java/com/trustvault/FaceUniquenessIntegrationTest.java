@@ -11,6 +11,7 @@ import com.trustvault.repository.AuditLogRepository;
 import com.trustvault.repository.FaceEnrollmentRepository;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.JwtTokenProvider;
+import com.trustvault.service.BiometricChallengeService;
 import com.trustvault.service.DocumentService;
 import com.trustvault.service.FaceEnrollmentService;
 import com.trustvault.support.FaceFixtures;
@@ -70,6 +71,9 @@ public class FaceUniquenessIntegrationTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private BiometricChallengeService biometricChallengeService;
 
     private User primary;
     private User second;
@@ -185,12 +189,15 @@ public class FaceUniquenessIntegrationTest {
         mockMvc.perform(post("/api/auth/biometric/verify-face")
                         .header("Authorization", "Bearer " + primaryToken)
                         .contentType("application/json")
-                        .content(verifyBody(documentId, "DOWNLOAD", FaceFixtures.rescan(PRIMARY_EMAIL))))
+                        .content(verifyBody(documentId, "DOWNLOAD", FaceFixtures.rescan(PRIMARY_EMAIL),
+                                challengeFor(primary, documentId, "DOWNLOAD"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.verified").value(true))
                 .andExpect(jsonPath("$.action").value("DOWNLOAD"))
                 .andExpect(jsonPath("$.score").isNumber())
-                .andExpect(jsonPath("$.threshold").value(0.4))
+                .andExpect(jsonPath("$.distance").isNumber())
+                .andExpect(jsonPath("$.threshold").value(0.6))
+                .andExpect(jsonPath("$.metric").value("EUCLIDEAN_DISTANCE"))
                 .andExpect(jsonPath("$.faceToken").isNotEmpty());
     }
 
@@ -206,7 +213,8 @@ public class FaceUniquenessIntegrationTest {
         mockMvc.perform(post("/api/auth/biometric/verify-face")
                         .header("Authorization", "Bearer " + primaryToken)
                         .contentType("application/json")
-                        .content(verifyBody(documentId, "EDIT", FaceFixtures.differentFace(SECOND_EMAIL))))
+                        .content(verifyBody(documentId, "EDIT", FaceFixtures.differentFace(SECOND_EMAIL),
+                                challengeFor(primary, documentId, "EDIT"))))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FACE_MISMATCH"))
                 .andExpect(jsonPath("$.anomalyCount").isNumber());
@@ -229,9 +237,10 @@ public class FaceUniquenessIntegrationTest {
         // A dedicated origin keeps this counter isolated from the other test methods.
         List<Integer> observedCounts = new ArrayList<>();
         for (int attempt = 0; attempt < 3; attempt++) {
+            String challenge = challengeFor(second, documentId, FaceEnrollmentService.ACTION_DOWNLOAD);
             FaceVerificationException failure = assertThrows(FaceVerificationException.class,
                     () -> faceEnrollmentService.verifyForAction(second, documentId,
-                            FaceEnrollmentService.ACTION_DOWNLOAD, wrongFace, ANOMALY_ORIGIN_IP));
+                            FaceEnrollmentService.ACTION_DOWNLOAD, wrongFace, challenge, ANOMALY_ORIGIN_IP));
             assertEquals(FaceVerificationException.MISMATCH, failure.getCode());
             observedCounts.add(failure.getAnomalyCount());
         }
@@ -253,7 +262,8 @@ public class FaceUniquenessIntegrationTest {
         mockMvc.perform(post("/api/auth/biometric/verify-face")
                         .header("Authorization", "Bearer " + primaryToken)
                         .contentType("application/json")
-                        .content(verifyBody(documentId, "DELETE", FaceFixtures.rescan(PRIMARY_EMAIL))))
+                        .content(verifyBody(documentId, "DELETE", FaceFixtures.rescan(PRIMARY_EMAIL),
+                                challengeFor(primary, documentId, "DOWNLOAD"))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -272,13 +282,15 @@ public class FaceUniquenessIntegrationTest {
         mockMvc.perform(post("/api/auth/biometric/verify-face")
                         .header("Authorization", "Bearer " + primaryToken)
                         .contentType("application/json")
-                        .content(verifyBody(documentId, "DOWNLOAD", FaceFixtures.rescan(PRIMARY_EMAIL))))
+                        .content(verifyBody(documentId, "DOWNLOAD", FaceFixtures.rescan(PRIMARY_EMAIL),
+                                challengeFor(primary, documentId, "DOWNLOAD"))))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FACE_NOT_ENROLLED"));
 
         mockMvc.perform(get("/api/documents/" + documentId + "/download")
                         .header("Authorization", "Bearer " + primaryToken)
-                        .header("X-Face-Descriptor", FaceFixtures.json(FaceFixtures.rescan(PRIMARY_EMAIL))))
+                        .header("X-Face-Descriptor", FaceFixtures.json(FaceFixtures.rescan(PRIMARY_EMAIL)))
+                        .header("X-Face-Challenge", challengeFor(primary, documentId, "DOWNLOAD")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FACE_NOT_ENROLLED"));
     }
@@ -454,8 +466,16 @@ public class FaceUniquenessIntegrationTest {
                 + ",\"deviceLabel\":\"integration-test\"}";
     }
 
-    private static String verifyBody(String documentId, String action, List<Double> descriptor) {
+    /** verify-face payload: a live capture only counts once a fresh challenge is redeemed. */
+    private static String verifyBody(String documentId, String action, List<Double> descriptor,
+                                     String challengeToken) {
         return "{\"documentId\":\"" + documentId + "\",\"action\":\"" + action
-                + "\",\"descriptor\":" + FaceFixtures.json(descriptor) + "}";
+                + "\",\"descriptor\":" + FaceFixtures.json(descriptor)
+                + ",\"challengeToken\":\"" + challengeToken + "\"}";
+    }
+
+    /** Issues a single-use challenge for this user/document/action, as the browser does. */
+    private String challengeFor(User user, String documentId, String action) {
+        return biometricChallengeService.issue(user, documentId, action, "10.0.0.9").getChallengeToken();
     }
 }

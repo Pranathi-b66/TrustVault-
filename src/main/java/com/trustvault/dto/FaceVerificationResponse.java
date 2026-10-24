@@ -12,7 +12,16 @@ public class FaceVerificationResponse {
     private String action;
     private String documentId;
     private double score;
+
+    /** Euclidean distance between the live probe and the enrolled template (lower is better). */
+    private double distance;
+
+    /** Maximum accepted distance; the server refuses anything above this value. */
     private double threshold;
+
+    /** Which metric {@code threshold} refers to; currently always {@code EUCLIDEAN_DISTANCE}. */
+    private String metric;
+
     private String faceToken;
     private long expiresInSeconds;
     private String algorithm;
@@ -48,6 +57,22 @@ public class FaceVerificationResponse {
 
     public void setScore(double score) {
         this.score = score;
+    }
+
+    public double getDistance() {
+        return distance;
+    }
+
+    public void setDistance(double distance) {
+        this.distance = distance;
+    }
+
+    public String getMetric() {
+        return metric;
+    }
+
+    public void setMetric(String metric) {
+        this.metric = metric;
     }
 
     public double getThreshold() {

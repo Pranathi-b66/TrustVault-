@@ -2,6 +2,9 @@
 
 let currentActiveDocForPerms = null;
 let currentTab = 'owned';
+// Mirrors the server-side SYSTEM_LOCKDOWN flag so the admin console can render the switch state.
+let lockdownState = { enabled: false, state: 'OPERATIONAL', reason: null, triggeredBy: null, triggeredAt: null };
+let lockdownPollHandle = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -110,6 +113,14 @@ function initAuthListeners() {
         renderAuthView();
     });
 
+    // The kill switch rejects non-admin traffic with 503 SYSTEM_LOCKDOWN. Callers that cannot read
+    // the admin-only status endpoint still get the freeze signal here (never the incident reason).
+    window.addEventListener('system-lockdown', (event) => {
+        showLockdownBanner(null, null);
+        const message = (event.detail && event.detail.message) || 'System is under administrative security lockdown';
+        showToast(message, 'error');
+    });
+
     document.getElementById('form-login').addEventListener('submit', async (e) => {
         e.preventDefault();
         const email = document.getElementById('login-email').value.trim();
@@ -142,7 +153,7 @@ function initAuthListeners() {
             showToast('Zero-Trust Policy: align your face inside the oval to bind this account.', 'info');
             const scan = await FaceIDUX.capture({
                 title: 'Mandatory Webcam FaceID Enrollment',
-                subtitle: 'Your account is bound to exactly one face. Align your face inside the oval and press Scan Face; a face already registered to another account is rejected.',
+                subtitle: 'Your account is bound to exactly one face. Align your face inside the oval, blink once when prompted to prove you are live, then press Scan Face; a face already registered to another account is rejected.',
                 actionLabel: 'Scan Face & Register'
             });
 
@@ -187,6 +198,8 @@ function checkExistingSession() {
 }
 
 function renderAuthView() {
+    stopLockdownPolling();
+    hideLockdownBanner();
     document.getElementById('view-auth').classList.remove('hidden');
     document.getElementById('view-dashboard').classList.add('hidden');
     document.getElementById('nav-user-container').classList.add('hidden');
@@ -223,6 +236,13 @@ function renderDashboard(user) {
         switchTab('admin');
     } else {
         switchTab('owned');
+    }
+
+    // Admins keep the kill-switch state fresh so a peer's containment action is visible here.
+    if (user.role === 'ADMIN') {
+        startLockdownPolling();
+    } else {
+        stopLockdownPolling();
     }
 }
 
@@ -416,6 +436,7 @@ async function loadAdminDashboard() {
     loadAdminUsers();
     loadAuditLogs();
     loadSecurityAlerts();
+    loadLockdownStatus();
 }
 
 async function loadAdminStats() {
@@ -438,6 +459,144 @@ async function loadAdminStats() {
     }
 }
 
+// ==============================================================
+// Emergency Global Kill Switch (SYSTEM_LOCKDOWN)
+// ==============================================================
+async function loadLockdownStatus(options = {}) {
+    try {
+        const status = await API.getLockdownStatus();
+        applyLockdownUi(status);
+    } catch (err) {
+        if (!options.silent) console.error('Failed to load lockdown status', err);
+    }
+}
+
+function applyLockdownUi(status) {
+    lockdownState = status || { enabled: false, state: 'OPERATIONAL' };
+    const enabled = !!lockdownState.enabled;
+
+    const chip = document.getElementById('lockdown-status-chip');
+    if (chip) {
+        chip.textContent = enabled ? 'LOCKED DOWN' : 'OPERATIONAL';
+        chip.className = enabled
+            ? 'px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-widest bg-rose-950 text-rose-300 border border-rose-700'
+            : 'px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-widest bg-emerald-950 text-emerald-300 border border-emerald-800';
+    }
+
+    const btn = document.getElementById('btn-toggle-lockdown');
+    if (btn) {
+        btn.innerHTML = enabled
+            ? '<i class="fa-solid fa-lock-open mr-1"></i> Lift Lockdown'
+            : '<i class="fa-solid fa-lock mr-1"></i> Engage Lockdown';
+        btn.className = enabled
+            ? 'whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/40 transition'
+            : 'whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/40 transition';
+    }
+
+    const detail = document.getElementById('lockdown-state-detail');
+    if (detail) {
+        if (enabled) {
+            detail.classList.remove('hidden');
+            document.getElementById('lockdown-detail-state').textContent = lockdownState.state || 'LOCKED_DOWN';
+            document.getElementById('lockdown-detail-reason').textContent = lockdownState.reason || '—';
+            document.getElementById('lockdown-detail-actor').textContent = lockdownState.triggeredBy || '—';
+            document.getElementById('lockdown-detail-time').textContent = formatDate(lockdownState.triggeredAt);
+        } else {
+            detail.classList.add('hidden');
+        }
+    }
+
+    if (enabled) {
+        showLockdownBanner(lockdownState.reason, lockdownState.triggeredAt);
+    } else {
+        hideLockdownBanner();
+    }
+}
+
+function showLockdownBanner(reason, triggeredAt) {
+    const banner = document.getElementById('lockdown-banner');
+    if (!banner) return;
+
+    const reasonEl = document.getElementById('lockdown-banner-reason');
+    if (reasonEl) {
+        reasonEl.textContent = reason ? `Reason: ${reason}` : '';
+        reasonEl.classList.toggle('hidden', !reason);
+    }
+
+    const sinceEl = document.getElementById('lockdown-banner-since');
+    if (sinceEl) {
+        sinceEl.textContent = triggeredAt ? `Since ${formatDate(triggeredAt)}` : '';
+    }
+
+    banner.classList.remove('hidden');
+}
+
+function hideLockdownBanner() {
+    const banner = document.getElementById('lockdown-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
+function startLockdownPolling() {
+    stopLockdownPolling();
+    lockdownPollHandle = setInterval(() => {
+        const user = API.getUser();
+        if (user && user.role === 'ADMIN' && API.getToken()) {
+            loadLockdownStatus({ silent: true });
+        }
+    }, 20000);
+}
+
+function stopLockdownPolling() {
+    if (lockdownPollHandle) {
+        clearInterval(lockdownPollHandle);
+        lockdownPollHandle = null;
+    }
+}
+
+async function toggleLockdown() {
+    const engage = !lockdownState.enabled;
+    const reasonInput = document.getElementById('lockdown-reason');
+    const reason = reasonInput ? reasonInput.value.trim() : '';
+
+    if (engage && reason.length < 5) {
+        showToast('A lockdown reason of at least 5 characters is required to engage the kill switch.', 'warning');
+        if (reasonInput) reasonInput.focus();
+        return;
+    }
+
+    if (!engage && !confirm('Lift the global lockdown?\n\nAll non-admin traffic and document operations (read, edit, upload, download) will resume immediately.')) {
+        return;
+    }
+
+    const btn = document.getElementById('btn-toggle-lockdown');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Applying...';
+    }
+
+    try {
+        const status = await API.setLockdown(engage, reason);
+        applyLockdownUi(status);
+        if (reasonInput) reasonInput.value = '';
+        showToast(
+            engage
+                ? 'GLOBAL LOCKDOWN ENGAGED. Non-admin traffic is frozen with 503 Service Unavailable.'
+                : 'Global lockdown lifted. Platform traffic restored.',
+            engage ? 'error' : 'success'
+        );
+        loadAuditLogs();
+        loadAdminStats();
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            // Re-render from the last confirmed server state so a failed POST never leaves a stale label.
+            applyLockdownUi(lockdownState);
+        }
+    }
+}
+
 // Admin Users & Instant Offboarding Kill Switch
 async function loadAdminUsers() {
     const tbody = document.getElementById('table-admin-users');
@@ -445,13 +604,23 @@ async function loadAdminUsers() {
 
     try {
         const users = await API.getAdminUsers();
+        const me = API.getUser();
         tbody.innerHTML = users.map(u => {
             const isActive = u.status === 'ACTIVE';
+            const isSelf = !!(me && me.email === u.email);
+            const roleCell = isSelf
+                ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-purple-950 text-purple-300 border border-purple-800">${escapeHtml(u.role)}</span>
+                   <span class="text-[10px] text-slate-500 ml-1">(you)</span>`
+                : `<select onchange="changeUserRole(this, '${u.id}', '${escapeHtml(u.role)}')"
+                           title="Change privilege tier (audited with before/after snapshots)"
+                           class="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[10px] font-bold font-mono text-slate-300 focus:outline-none focus:border-cyan-500">
+                       ${['ADMIN', 'OWNER', 'VIEWER'].map(r => `<option value="${r}"${r === u.role ? ' selected' : ''}>${r}</option>`).join('')}
+                   </select>`;
             return `
                 <tr class="hover:bg-slate-950/60 transition">
                     <td class="px-4 py-3 font-medium text-slate-100">${escapeHtml(u.fullName)}</td>
                     <td class="px-4 py-3 font-mono text-slate-400">${escapeHtml(u.email)}</td>
-                    <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(u.role)}</span></td>
+                    <td class="px-4 py-3">${roleCell}</td>
                     <td class="px-4 py-3">
                         <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isActive ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">
                             ${isActive ? 'ACTIVE' : 'INACTIVE'}
@@ -505,21 +674,54 @@ async function triggerReactivate(userId, email) {
     }
 }
 
+/**
+ * Privilege-tier change. The server snapshots the identity before and after the mutation, so this
+ * action immediately becomes replayable in the forensic inspector.
+ */
+async function changeUserRole(selectEl, userId, previousRole) {
+    const newRole = selectEl.value;
+    if (newRole === previousRole) return;
+
+    if (!confirm(`Change this identity's role?\n\n${previousRole} → ${newRole}\n\nThis mutation is recorded in the WORM audit trail with before/after snapshots.`)) {
+        selectEl.value = previousRole;
+        return;
+    }
+
+    selectEl.disabled = true;
+    try {
+        await API.changeUserRole(userId, newRole);
+        showToast(`Role updated: ${previousRole} → ${newRole}.`, 'success');
+        loadAdminUsers();
+        loadAuditLogs();
+        loadAdminStats();
+    } catch (err) {
+        showToast(err.message, 'error');
+        selectEl.value = previousRole;
+        selectEl.disabled = false;
+    }
+}
+
 // Admin WORM Audit Trail Inspector
 async function loadAuditLogs() {
     const tbody = document.getElementById('table-audit-logs');
-    tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">Loading immutable audit logs...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-slate-500">Loading immutable audit logs...</td></tr>';
 
     try {
         const logs = await API.getAuditLogs();
         if (logs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">No audit logs recorded yet.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-slate-500">No audit logs recorded yet.</td></tr>';
             return;
         }
 
         tbody.innerHTML = logs.map(l => {
             const isDenial = l.action === 'ACCESS_DENIED' || l.action === 'SECURITY_ALERT' || l.action === 'ACCOUNT_INACTIVE_ACCESS_ATTEMPT';
-            const actionClass = isDenial ? 'text-rose-400 font-bold' : (l.action === 'UPLOAD' ? 'text-emerald-400' : 'text-teal-400');
+            let actionClass = 'text-teal-400';
+            if (isDenial) actionClass = 'text-rose-400 font-bold';
+            else if (l.action === 'UPLOAD') actionClass = 'text-emerald-400';
+            else if (l.action === 'SYSTEM_LOCKDOWN_TRIGGERED') actionClass = 'text-rose-300 font-black';
+            else if (l.action === 'SYSTEM_LOCKDOWN_LIFTED') actionClass = 'text-emerald-300 font-bold';
+            else if (l.action === 'ROLE_CHANGED') actionClass = 'text-purple-300 font-bold';
+
             const statusClass = l.status === 'SUCCESS' ? 'text-emerald-400' : 'text-rose-400 font-bold';
 
             return `
@@ -532,11 +734,18 @@ async function loadAuditLogs() {
                     <td class="px-3 py-2 text-slate-400 max-w-xs truncate" title="${escapeHtml(l.details || '')}">
                         ${escapeHtml(l.details || '—')}
                     </td>
+                    <td class="px-3 py-2 text-right">
+                        <button onclick="openAuditDiff('${l.id}')"
+                                title="Inspect Action Replay: before/after state diff"
+                                class="px-2.5 py-1 rounded-lg bg-teal-950 text-teal-300 border border-teal-800 hover:bg-teal-900 text-[10px] font-semibold transition">
+                            <i class="fa-solid fa-clock-rotate-left mr-1"></i> Replay
+                        </button>
+                    </td>
                 </tr>
             `;
         }).join('');
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -571,6 +780,122 @@ async function loadSecurityAlerts() {
         `).join('');
     } catch (err) {
         console.error('Failed to load security alerts', err);
+    }
+}
+
+// ==============================================================
+// Action Replay Forensic Inspector (before/after snapshot diff)
+// ==============================================================
+async function openAuditDiff(auditId) {
+    const modal = document.getElementById('modal-audit-diff');
+    if (!modal) return;
+
+    document.getElementById('diff-audit-meta').textContent = 'Loading forensic snapshots...';
+    document.getElementById('diff-summary').innerHTML = '';
+    document.getElementById('diff-empty').classList.add('hidden');
+    document.getElementById('diff-pre-json').textContent = '—';
+    document.getElementById('diff-post-json').textContent = '—';
+    document.getElementById('diff-event-details').textContent = '—';
+    document.getElementById('table-diff-changes').innerHTML =
+        '<tr><td colspan="4" class="px-3 py-6 text-center text-slate-500">Loading delta...</td></tr>';
+
+    modal.classList.remove('hidden');
+
+    try {
+        const diff = await API.getAuditDiff(auditId);
+        renderAuditDiff(diff);
+    } catch (err) {
+        document.getElementById('diff-audit-meta').textContent = 'Forensic replay unavailable';
+        document.getElementById('table-diff-changes').innerHTML =
+            `<tr><td colspan="4" class="px-3 py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+        showToast(err.message, 'error');
+    }
+}
+
+function closeAuditDiff() {
+    const modal = document.getElementById('modal-audit-diff');
+    if (modal) modal.classList.add('hidden');
+}
+
+function renderAuditDiff(diff) {
+    document.getElementById('diff-audit-meta').textContent =
+        `${diff.action} • ${diff.resourceType || 'RESOURCE'} ${diff.resourceId || '(no id)'} • actor ${diff.actorEmail || 'unknown'} • ${diff.ipAddress || 'unknown IP'} • ${formatDate(diff.timestamp)}`;
+
+    const summary = diff.summary || {};
+    const chips = [
+        { label: 'Modified', value: summary.modified, cls: 'bg-amber-950 text-amber-300 border-amber-800' },
+        { label: 'Added', value: summary.added, cls: 'bg-emerald-950 text-emerald-300 border-emerald-800' },
+        { label: 'Removed', value: summary.removed, cls: 'bg-rose-950 text-rose-300 border-rose-800' },
+        { label: 'Fields', value: summary.total, cls: 'bg-slate-800 text-slate-300 border-slate-700' }
+    ];
+    document.getElementById('diff-summary').innerHTML = `
+        <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border bg-indigo-950 text-indigo-300 border-indigo-800">${escapeHtml(diff.action || '—')}</span>
+        <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono border ${diff.status === 'SUCCESS' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-rose-950 text-rose-300 border-rose-800'}">${escapeHtml(diff.status || '—')}</span>
+        ${chips.map(c => `
+            <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border ${c.cls}">
+                ${c.label}: ${Number.isFinite(c.value) ? c.value : 0}
+            </span>
+        `).join('')}
+    `;
+
+    document.getElementById('diff-pre-json').textContent = prettyJson(diff.preState, 'null (no prior state captured)');
+    document.getElementById('diff-post-json').textContent = prettyJson(diff.postState, 'null (resource removed or state not captured)');
+
+    const changes = diff.changes || [];
+    document.getElementById('diff-empty').classList.toggle('hidden', changes.length > 0 || !!diff.hasSnapshot);
+
+    const tbody = document.getElementById('table-diff-changes');
+    if (changes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="px-3 py-6 text-center text-slate-500">No field-level changes recorded for this event.</td></tr>';
+    } else {
+        tbody.innerHTML = changes.map(c => {
+            const changeType = c.changeType || 'MODIFIED';
+            const badgeClass = changeType === 'ADDED'
+                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                : changeType === 'REMOVED'
+                    ? 'bg-rose-950 text-rose-300 border-rose-800'
+                    : 'bg-amber-950 text-amber-300 border-amber-800';
+
+            return `
+                <tr class="hover:bg-slate-950/60 transition">
+                    <td class="px-3 py-2 text-slate-200 whitespace-nowrap">${escapeHtml(c.field)}</td>
+                    <td class="px-3 py-2 text-rose-300/90 break-all">${formatDiffValue(c.before)}</td>
+                    <td class="px-3 py-2 text-emerald-300/90 break-all">${formatDiffValue(c.after)}</td>
+                    <td class="px-3 py-2">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${badgeClass}">${escapeHtml(changeType)}</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    document.getElementById('diff-event-details').textContent =
+        prettyJson(parseJsonSafely(diff.details), '—');
+}
+
+function formatDiffValue(value) {
+    if (value === null || value === undefined) return '<span class="text-slate-600 italic">null</span>';
+    if (typeof value === 'object') return escapeHtml(JSON.stringify(value));
+    if (value === '') return '<span class="text-slate-600 italic">"" empty</span>';
+    return escapeHtml(String(value));
+}
+
+function prettyJson(value, fallback) {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'string') {
+        const parsed = parseJsonSafely(value);
+        return parsed === null ? value : JSON.stringify(parsed, null, 2);
+    }
+    return JSON.stringify(value, null, 2);
+}
+
+function parseJsonSafely(raw) {
+    if (raw === null || raw === undefined || raw === '') return null;
+    if (typeof raw === 'object') return raw;
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        return null;
     }
 }
 
@@ -835,3 +1160,12 @@ function cancelFacePrompt() {
     FaceIDUX.cancel();
     showToast('Face verification cancelled. Action aborted.', 'warning');
 }
+
+// Forensic modal dismissal: backdrop click or Escape key.
+document.getElementById('modal-audit-diff').addEventListener('click', (event) => {
+    if (event.target.id === 'modal-audit-diff') closeAuditDiff();
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeAuditDiff();
+});

@@ -8,7 +8,12 @@ import java.util.List;
 
 /**
  * Action-time face proof: the embedding captured from the webcam immediately before a
- * DOWNLOAD or EDIT.
+ * DOWNLOAD or EDIT, together with the timestamped challenge that proves the capture is fresh.
+ *
+ * <p>{@code challengeToken} is intentionally not {@code @NotBlank}: a missing challenge must be
+ * rejected by the verification service so the attempt is written to the audit trail as
+ * {@code FACE_CHALLENGE_REQUIRED}, rather than short-circuiting as a generic 400 validation
+ * error.</p>
  */
 public class FaceVerificationRequest {
 
@@ -23,6 +28,10 @@ public class FaceVerificationRequest {
     @NotNull
     @Size(min = 16, max = 1024)
     private List<Double> descriptor;
+
+    /** Signed, single-use challenge minted by {@code POST /api/auth/biometric/challenge}. */
+    @Size(max = 2048)
+    private String challengeToken;
 
     public String getDocumentId() {
         return documentId;
@@ -46,5 +55,13 @@ public class FaceVerificationRequest {
 
     public void setDescriptor(List<Double> descriptor) {
         this.descriptor = descriptor;
+    }
+
+    public String getChallengeToken() {
+        return challengeToken;
+    }
+
+    public void setChallengeToken(String challengeToken) {
+        this.challengeToken = challengeToken;
     }
 }

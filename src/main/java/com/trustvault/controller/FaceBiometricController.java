@@ -1,5 +1,7 @@
 package com.trustvault.controller;
 
+import com.trustvault.dto.BiometricChallengeRequest;
+import com.trustvault.dto.BiometricChallengeResponse;
 import com.trustvault.dto.FaceRegistrationRequest;
 import com.trustvault.dto.FaceStatusResponse;
 import com.trustvault.dto.FaceVerificationRequest;
@@ -8,6 +10,7 @@ import com.trustvault.entity.FaceEnrollment;
 import com.trustvault.entity.User;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.UserPrincipal;
+import com.trustvault.service.BiometricChallengeService;
 import com.trustvault.service.FaceEnrollmentService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -29,10 +32,13 @@ import java.util.Map;
  * Exclusive face enrollment and action-time verification endpoints.
  *
  * <ul>
+ *   <li>{@code POST /challenge} - issues the timestamped, single-use nonce the browser must
+ *       submit with the descriptor. It expires after 30 seconds and cannot be replayed.</li>
  *   <li>{@code POST /register-face} - binds the authenticated profile to a live facial
  *       embedding. A face already owned by another account is rejected with {@code 400}.</li>
  *   <li>{@code POST /verify-face} - matches a fresh webcam capture against <em>this</em> user's
- *       descriptor and issues the short-lived action token consumed by download/edit.</li>
+ *       descriptor, after redeeming the challenge, and issues the short-lived action token
+ *       consumed by download/edit.</li>
  *   <li>{@code GET /face-status} - enrollment state for the current identity.</li>
  *   <li>{@code DELETE /face} - revokes the enrollment (re-enrollment required afterwards).</li>
  * </ul>
@@ -42,10 +48,14 @@ import java.util.Map;
 public class FaceBiometricController {
 
     private final FaceEnrollmentService faceEnrollmentService;
+    private final BiometricChallengeService biometricChallengeService;
     private final UserRepository userRepository;
 
-    public FaceBiometricController(FaceEnrollmentService faceEnrollmentService, UserRepository userRepository) {
+    public FaceBiometricController(FaceEnrollmentService faceEnrollmentService,
+                                   BiometricChallengeService biometricChallengeService,
+                                   UserRepository userRepository) {
         this.faceEnrollmentService = faceEnrollmentService;
+        this.biometricChallengeService = biometricChallengeService;
         this.userRepository = userRepository;
     }
 
@@ -83,6 +93,22 @@ public class FaceBiometricController {
         return ResponseEntity.ok(body);
     }
 
+    /**
+     * Hands the browser a fresh challenge immediately before the webcam modal opens. The nonce is
+     * bound to this identity, this document and this action, and is valid for at most 30 seconds.
+     */
+    @PostMapping("/challenge")
+    public ResponseEntity<BiometricChallengeResponse> challenge(
+            @Valid @RequestBody BiometricChallengeRequest request,
+            @AuthenticationPrincipal UserPrincipal principal,
+            HttpServletRequest httpRequest) {
+
+        String action = FaceEnrollmentService.normaliseAction(request.getAction());
+        BiometricChallengeResponse response = biometricChallengeService.issue(
+                currentUser(principal), request.getDocumentId(), action, getClientIp(httpRequest));
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/verify-face")
     public ResponseEntity<FaceVerificationResponse> verifyFace(
             @Valid @RequestBody FaceVerificationRequest request,
@@ -94,6 +120,7 @@ public class FaceBiometricController {
                 request.getDocumentId(),
                 request.getAction(),
                 request.getDescriptor(),
+                request.getChallengeToken(),
                 getClientIp(httpRequest));
 
         return ResponseEntity.ok(response);

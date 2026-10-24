@@ -46,6 +46,22 @@
         </div>
     </header>
 
+    <!-- ============ EMERGENCY GLOBAL LOCKDOWN BANNER ============ -->
+    <div id="lockdown-banner" class="hidden bg-rose-950/95 border-b-2 border-rose-600 text-rose-100 shadow-lg shadow-rose-950/40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div class="flex items-center space-x-3 text-xs sm:text-sm">
+                <span class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                </span>
+                <i class="fa-solid fa-lock text-rose-300"></i>
+                <span class="font-black uppercase tracking-widest font-mono">System Lockdown Active</span>
+                <span id="lockdown-banner-reason" class="text-rose-300 hidden md:inline truncate max-w-md"></span>
+            </div>
+            <span id="lockdown-banner-since" class="text-[10px] font-mono uppercase tracking-wider text-rose-300/90"></span>
+        </div>
+    </div>
+
     <!-- Global Toast Container -->
     <div id="toast-container" class="fixed top-20 right-6 z-50 flex flex-col space-y-2 max-w-sm pointer-events-none"></div>
 
@@ -366,6 +382,44 @@
                     </div>
                 </div>
 
+                <!-- Emergency Global Kill Switch -->
+                <div id="panel-lockdown" class="bg-slate-900/80 border border-rose-900/60 rounded-2xl p-6 shadow-xl space-y-4">
+                    <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                        <div class="space-y-1.5 max-w-3xl">
+                            <div class="flex items-center space-x-2">
+                                <h3 class="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center space-x-2">
+                                    <i class="fa-solid fa-power-off text-rose-400"></i>
+                                    <span>Emergency Global Kill Switch</span>
+                                </h3>
+                                <span id="lockdown-status-chip" class="px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-widest bg-emerald-950 text-emerald-300 border border-emerald-800">
+                                    OPERATIONAL
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-400">
+                                Freezes the platform: every non-admin request and <strong class="text-rose-300">all</strong> document
+                                operations (read, edit, upload, download) receive
+                                <code class="text-rose-400">503 Service Unavailable</code>. Administrators keep this console so
+                                the incident can be managed and the lockdown lifted once containment is verified.
+                            </p>
+                        </div>
+                        <div class="flex flex-col sm:flex-row gap-2 w-full lg:w-auto lg:pt-1">
+                            <input id="lockdown-reason" type="text" maxlength="500"
+                                   placeholder="Incident reason (required to engage)"
+                                   class="w-full sm:w-72 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-rose-500">
+                            <button id="btn-toggle-lockdown" onclick="toggleLockdown()"
+                                    class="whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/40 transition">
+                                <i class="fa-solid fa-lock mr-1"></i> Engage Lockdown
+                            </button>
+                        </div>
+                    </div>
+                    <div id="lockdown-state-detail" class="hidden p-3 rounded-xl bg-rose-950/60 border border-rose-800 text-[11px] text-rose-200 font-mono space-y-1">
+                        <div><span class="text-rose-400 uppercase">Status:</span> <span id="lockdown-detail-state">LOCKED_DOWN</span></div>
+                        <div><span class="text-rose-400 uppercase">Reason:</span> <span id="lockdown-detail-reason">—</span></div>
+                        <div><span class="text-rose-400 uppercase">Triggered By:</span> <span id="lockdown-detail-actor">—</span></div>
+                        <div><span class="text-rose-400 uppercase">Triggered At:</span> <span id="lockdown-detail-time">—</span></div>
+                    </div>
+                </div>
+
                 <!-- Instant Offboarding Controls -->
                 <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
                     <div class="flex items-center justify-between">
@@ -439,11 +493,12 @@
                                     <th class="px-3 py-2.5">Source IP</th>
                                     <th class="px-3 py-2.5">Status</th>
                                     <th class="px-3 py-2.5">Security Event Details</th>
+                                    <th class="px-3 py-2.5 text-right">Forensics</th>
                                 </tr>
                             </thead>
                             <tbody id="table-audit-logs" class="divide-y divide-slate-800/80 font-mono text-[11px]">
                                 <tr>
-                                    <td colspan="6" class="px-4 py-8 text-center text-slate-500">Loading immutable audit logs...</td>
+                                    <td colspan="7" class="px-4 py-8 text-center text-slate-500">Loading immutable audit logs...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -668,10 +723,89 @@
         </div>
     </div>
 
+    <!-- ======================= MODAL: ACTION REPLAY FORENSIC DIFF ======================= -->
+    <div id="modal-audit-diff" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-sm hidden p-3 sm:p-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-6xl w-full max-h-[92vh] shadow-2xl flex flex-col overflow-hidden">
+            <div class="flex items-start justify-between p-5 border-b border-slate-800">
+                <div>
+                    <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                        <i class="fa-solid fa-clock-rotate-left text-teal-400"></i>
+                        <span>Inspect Action Replay</span>
+                    </h3>
+                    <p id="diff-audit-meta" class="text-[11px] font-mono text-slate-400 mt-1">Loading forensic snapshots...</p>
+                </div>
+                <button type="button" onclick="closeAuditDiff()" class="text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div id="diff-summary" class="px-5 pt-4 flex flex-wrap items-center gap-2"></div>
+
+            <div class="flex-1 overflow-y-auto p-5 space-y-5">
+                <div id="diff-empty" class="hidden p-4 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-400">
+                    This audit entry has no before/after snapshots (it predates Action Replay or is not a state-bearing action).
+                    The immutable event envelope below is still authoritative.
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="rounded-xl border border-rose-900/60 bg-slate-950/70 overflow-hidden">
+                        <div class="px-3 py-2 bg-slate-950 border-b border-rose-900/50 text-[10px] font-mono uppercase tracking-widest text-rose-300">
+                            Before &mdash; pre_state
+                        </div>
+                        <pre id="diff-pre-json" class="p-3 text-[11px] leading-relaxed text-slate-300 overflow-auto max-h-64"></pre>
+                    </div>
+                    <div class="rounded-xl border border-emerald-900/60 bg-slate-950/70 overflow-hidden">
+                        <div class="px-3 py-2 bg-slate-950 border-b border-emerald-900/50 text-[10px] font-mono uppercase tracking-widest text-emerald-300">
+                            After &mdash; post_state
+                        </div>
+                        <pre id="diff-post-json" class="p-3 text-[11px] leading-relaxed text-slate-300 overflow-auto max-h-64"></pre>
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-800 overflow-hidden">
+                    <div class="px-3 py-2 bg-slate-950 border-b border-slate-800 text-[10px] font-mono uppercase tracking-widest text-slate-400">
+                        Field-Level Delta
+                    </div>
+                    <div class="max-h-72 overflow-y-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-950/80 text-slate-500 font-mono uppercase text-[10px] sticky top-0">
+                                <tr>
+                                    <th class="px-3 py-2">Field</th>
+                                    <th class="px-3 py-2">Before</th>
+                                    <th class="px-3 py-2">After</th>
+                                    <th class="px-3 py-2">Change</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-diff-changes" class="divide-y divide-slate-800/80 font-mono text-[11px]">
+                                <tr>
+                                    <td colspan="4" class="px-3 py-6 text-center text-slate-500">Loading delta...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-800 bg-slate-950/70 overflow-hidden">
+                    <div class="px-3 py-2 bg-slate-950 border-b border-slate-800 text-[10px] font-mono uppercase tracking-widest text-slate-400">
+                        Recorded Event Details (JSON)
+                    </div>
+                    <pre id="diff-event-details" class="p-3 text-[11px] leading-relaxed text-slate-400 overflow-auto max-h-40"></pre>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-slate-800 flex items-center justify-between">
+                <span class="text-[10px] text-slate-500 font-mono">Immutable WORM record &bull; append-only &bull; no updates possible</span>
+                <button type="button" onclick="closeAuditDiff()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js"></script>
     <script src="js/api.js"></script>
-    <script src="js/faceid.js"></script>
+    <script src="js/faceid.js?v=20261024"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

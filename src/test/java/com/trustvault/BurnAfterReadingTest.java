@@ -9,6 +9,7 @@ import com.trustvault.entity.User;
 import com.trustvault.entity.UserStatus;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.JwtTokenProvider;
+import com.trustvault.service.BiometricChallengeService;
 import com.trustvault.service.DocumentService;
 import com.trustvault.service.FaceEnrollmentService;
 import com.trustvault.service.PermissionService;
@@ -26,6 +27,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -51,6 +53,9 @@ public class BurnAfterReadingTest {
     @Autowired
     private FaceEnrollmentService faceEnrollmentService;
 
+    @Autowired
+    private BiometricChallengeService biometricChallengeService;
+
     private User owner;
     private User recipient;
     private String recipientToken;
@@ -74,11 +79,14 @@ public class BurnAfterReadingTest {
         faceEnrollmentService.enroll(recipient, FaceFixtures.descriptor(recipient.getEmail()), "127.0.0.1");
     }
 
-    /** Mints a short-lived DOWNLOAD authorisation by re-scanning the recipient's enrolled face. */
-    private String mintDownloadToken(String documentId) {
+    /** Mints a short-lived DOWNLOAD authorisation by re-scanning the given user's enrolled face. */
+    private String mintDownloadToken(User user, String documentId) {
+        // Each verification redeems its own timestamped challenge, as the browser does.
+        String challenge = biometricChallengeService.issue(
+                user, documentId, FaceEnrollmentService.ACTION_DOWNLOAD, "127.0.0.1").getChallengeToken();
         FaceVerificationResponse response = faceEnrollmentService.verifyForAction(
-                recipient, documentId, FaceEnrollmentService.ACTION_DOWNLOAD,
-                FaceFixtures.rescan(recipient.getEmail()), "127.0.0.1");
+                user, documentId, FaceEnrollmentService.ACTION_DOWNLOAD,
+                FaceFixtures.rescan(user.getEmail()), challenge, "127.0.0.1");
         return response.getFaceToken();
     }
 
@@ -94,15 +102,48 @@ public class BurnAfterReadingTest {
         // 1st download attempt: succeeds (consumes the 1 permitted view)
         mockMvc.perform(get("/api/documents/" + doc.getId() + "/download")
                         .header("Authorization", "Bearer " + recipientToken)
-                        .header("X-Face-Token", mintDownloadToken(doc.getId())))
+                        .header("X-Face-Token", mintDownloadToken(recipient, doc.getId())))
                 .andExpect(status().isOk());
 
         // 2nd download attempt: the scan still verifies, but the view budget is burned, so the
         // rejection must come from the burn-after-reading rule rather than the face gate.
         mockMvc.perform(get("/api/documents/" + doc.getId() + "/download")
                         .header("Authorization", "Bearer " + recipientToken)
-                        .header("X-Face-Token", mintDownloadToken(doc.getId())))
+                        .header("X-Face-Token", mintDownloadToken(recipient, doc.getId())))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Burn-After-Reading: an ADMIN's own share still burns, while the admin override survives")
+    void adminShareStillBurns() throws Exception {
+        User admin = userRepository.findByEmail("burn.admin@internal.test").orElseGet(() -> userRepository.save(
+                new User(UUID.randomUUID().toString(), "burn.admin@internal.test", "hash", "Burn Admin",
+                        Role.ADMIN, UserStatus.ACTIVE)));
+        faceEnrollmentService.enroll(admin, FaceFixtures.descriptor(admin.getEmail()), "127.0.0.1");
+        String adminToken = jwtTokenProvider.generateTokenFromUser(
+                admin.getId(), admin.getEmail(), admin.getRole().name());
+
+        MockMultipartFile file = new MockMultipartFile("file", "admin_burn.txt", "text/plain", "Admin Burn".getBytes());
+        DocumentResponse doc = documentService.uploadDocument("Admin Burn Doc", "Confidential", file, owner, "127.0.0.1");
+
+        GrantPermissionRequest grant = new GrantPermissionRequest(admin.getEmail(), PermissionLevel.READ, 1, null);
+        permissionService.grantPermission(doc.getId(), owner, grant, "127.0.0.1");
+
+        mockMvc.perform(get("/api/documents/" + doc.getId() + "/download")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .header("X-Face-Token", mintDownloadToken(admin, doc.getId())))
+                .andExpect(status().isOk());
+
+        // The single permitted view is spent: the grant row is gone even though the caller is an
+        // ADMIN. This is the regression: the early ADMIN return used to skip the counter entirely.
+        assertTrue(permissionService.getDocumentPermissions(doc.getId(), owner, "127.0.0.1").isEmpty(),
+                "A burn-after-reading grant held by an ADMIN must still be consumed");
+
+        // The override itself is untouched, so an administrator can still act after the share burns.
+        mockMvc.perform(get("/api/documents/" + doc.getId() + "/download")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .header("X-Face-Token", mintDownloadToken(admin, doc.getId())))
+                .andExpect(status().isOk());
     }
 
     @Test

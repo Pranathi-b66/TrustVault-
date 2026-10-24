@@ -4,6 +4,7 @@ import com.trustvault.entity.AuditAction;
 import com.trustvault.entity.AuditStatus;
 import com.trustvault.security.CustomUserDetailsService;
 import com.trustvault.security.JwtAuthenticationFilter;
+import com.trustvault.security.SystemLockdownFilter;
 import com.trustvault.security.UserAccountStatusFilter;
 import com.trustvault.service.AuditLogService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -32,15 +33,18 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final UserAccountStatusFilter userAccountStatusFilter;
+    private final SystemLockdownFilter systemLockdownFilter;
     private final CustomUserDetailsService customUserDetailsService;
     private final AuditLogService auditLogService;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           UserAccountStatusFilter userAccountStatusFilter,
+                          SystemLockdownFilter systemLockdownFilter,
                           CustomUserDetailsService customUserDetailsService,
                           AuditLogService auditLogService) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.userAccountStatusFilter = userAccountStatusFilter;
+        this.systemLockdownFilter = systemLockdownFilter;
         this.customUserDetailsService = customUserDetailsService;
         this.auditLogService = auditLogService;
     }
@@ -119,7 +123,10 @@ public class SecurityConfig {
             )
             .authenticationProvider(authenticationProvider())
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterAfter(userAccountStatusFilter, JwtAuthenticationFilter.class);
+            .addFilterAfter(userAccountStatusFilter, JwtAuthenticationFilter.class)
+            // Global kill switch runs after identity is established but before authorization, so it
+            // can freeze every non-admin surface (and all document traffic) with a 503.
+            .addFilterAfter(systemLockdownFilter, UserAccountStatusFilter.class);
 
         return http.build();
     }

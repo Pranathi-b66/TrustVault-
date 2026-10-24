@@ -57,6 +57,23 @@ public final class FaceFixtures {
         return mirrored;
     }
 
+    /**
+     * Same seed, deliberately drifted to sit at exactly {@code distance} from
+     * {@link #descriptor(String)} in L2 space (each component moves by distance/sqrt(128)).
+     * This lets the suite pin the 0.60 identity ceiling from both sides: 0.45 is inside the
+     * model's intra-person range and must be accepted, 0.75 is a different identity and must be
+     * rejected.
+     */
+    public static List<Double> atDistance(String seed, double distance) {
+        List<Double> base = descriptor(seed);
+        double step = distance / Math.sqrt(DIMENSION);
+        List<Double> shifted = new ArrayList<>(DIMENSION);
+        for (Double value : base) {
+            shifted.add(round(value + step));
+        }
+        return shifted;
+    }
+
     /** Serialises an embedding as the JSON array accepted by {@code X-Face-Descriptor}. */
     public static String json(List<Double> descriptor) {
         StringBuilder json = new StringBuilder(descriptor.size() * 12 + 2).append('[');
