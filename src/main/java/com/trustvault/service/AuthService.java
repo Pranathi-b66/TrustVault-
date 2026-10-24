@@ -9,6 +9,9 @@ import com.trustvault.entity.UserStatus;
 import com.trustvault.repository.UserRepository;
 import com.trustvault.security.JwtTokenProvider;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -20,10 +23,21 @@ import java.util.UUID;
 @Service
 public class AuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final FaceEnrollmentService faceEnrollmentService;
+
+    /**
+     * Opt-in demo bootstrap. Off by default so a freshly purged database stays pristine: the
+     * first identity is created through the normal FaceID sign-up flow instead of reappearing
+     * with a well-known password after every restart. Enable only for local demos with
+     * {@code trustvault.bootstrap.seed-default-users=true}.
+     */
+    @Value("${trustvault.bootstrap.seed-default-users:false}")
+    private boolean seedDefaultUsers;
 
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
@@ -38,6 +52,11 @@ public class AuthService {
     @PostConstruct
     @Transactional
     public void initDefaultCredentials() {
+        if (!seedDefaultUsers) {
+            log.info("Demo bootstrap disabled (trustvault.bootstrap.seed-default-users=false); "
+                    + "identities must be created through the FaceID sign-up flow.");
+            return;
+        }
         // Ensure default seeded accounts have valid default passwords if not set
         ensureUserPassword("usr-admin-01", "admin@trustvault.internal", "Admin@123", "Security Administrator", Role.ADMIN);
         ensureUserPassword("usr-owner-01", "owner@trustvault.internal", "Owner@123", "Alice Document Owner", Role.OWNER);

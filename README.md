@@ -8,6 +8,8 @@ TrustVault is a production-ready, security-first document management and sharing
 
 1. **Zero-Trust Contextual Permissions & IDOR Defense:**
    - 3 Baseline roles: `ADMIN`, `OWNER`, and `VIEWER`.
+   - `OWNER` and `VIEWER` share one unified vault baseline: both upload, search, grant ACLs on what they own, and read what was shared with them. The label does not change what a caller may touch — only document position (owner or live grant) does.
+   - `ADMIN` is the only genuine separation: `/api/admin/**`, the kill switch, the ACL override, break-glass and the audit console.
    - Contextual ownership: document uploaders automatically become the authoritative `Owner`.
    - Granular ACL (`READ` or `EDIT`) granted strictly per-document in `document_permissions`.
    - Complete prevention of Insecure Direct Object References (IDOR): unauthenticated or unauthorized users trying to view, download, edit, or delete any document immediately receive `403 Forbidden` with full audit logging.
@@ -36,6 +38,11 @@ TrustVault is a production-ready, security-first document management and sharing
    - Backed by MySQL `BEFORE UPDATE` and `BEFORE DELETE` triggers that raise `SIGNAL SQLSTATE '45000'`.
    - Hibernate runs in `spring.jpa.hibernate.ddl-auto=validate` to protect custom database triggers.
 
+7. **Break-Glass Emergency Access (evidence, not authorization):**
+   - `POST /api/admin/break-glass` takes a document id and a justification (10-500 characters) and writes an immutable `BREAK_GLASS_ACCESS` row with a `pre_state` document snapshot.
+   - The declaration records *intent*; it neither widens the administrator's rights nor replaces the live face gate. The subsequent read is audited as its own `READ` row and burn-after-reading accounting still applies.
+   - Administrators only, like the rest of `/api/admin/**`, with a live role re-check against the database row.
+
 ---
 
 ## 🛠️ Technology Stack
@@ -47,21 +54,27 @@ TrustVault is a production-ready, security-first document management and sharing
 
 ---
 
-## 🚀 Pre-Seeded Identities (Default Logins)
+## 🚀 Identity Bootstrap (No Seeded Accounts)
 
-The system automatically initializes default passwords on first startup if empty. Navigate to `http://localhost:8088`:
+TrustVault ships with `trustvault.bootstrap.seed-default-users=false`: a fresh database stays empty and every identity is created through the FaceID sign-up flow, so no shared "default password" account exists in a production-like deployment.
 
-| Email | Default Password | Role | Description |
-| :--- | :--- | :--- | :--- |
-| `admin@trustvault.internal` | `Admin@123` | **ADMIN** | Security Administrator (User offboarding, WORM audit inspector, anomaly alerts) |
-| `owner@trustvault.internal` | `Owner@123` | **OWNER** | Alice (Uploads assets, grants ACLs, configures Burn-After-Reading) |
-| `viewer@trustvault.internal` | `Viewer@123` | **VIEWER** | Bob (Consumes shared assets after a live webcam face scan) |
+1. Open `http://localhost:8088` → **Register**.
+2. Fill in name, email and password, then choose **ADMIN (Security Console & Operations)** for the first operator or **MEMBER (Vault Workspace)** for everyone else.
+3. Complete the webcam FaceID enrollment when the modal opens: centre your face and **turn your head slightly left or right** to pass the liveness check.
+4. Submit — the account and its face binding are created in one transaction.
+
+| Role | Landing surface | Capabilities |
+| :--- | :--- | :--- |
+| `ADMIN` | Admin Console | Kill switch, user offboarding, WORM audit inspector, anomaly feed, break-glass — plus the same vault baseline as everyone else |
+| `OWNER` / `VIEWER` | Owned Documents | Upload, edit and delete what you own, grant per-document ACLs, read what was shared with you |
+
+To restore the old demo accounts for a local showcase only, set `trustvault.bootstrap.seed-default-users=true`; `AuthService` then re-creates `admin@`, `owner@` and `viewer@` on every start. Never enable it against a database you have deliberately reset.
 
 ---
 
 ## 🧪 Automated Integration Tests
 
-Execute the comprehensive test suite verifying IDOR protection, face uniqueness and action gating, WORM immutability, burn links, and anomaly detection:
+Execute the comprehensive suite (55 tests) verifying IDOR protection, face uniqueness and action gating, WORM immutability, burn links, anomaly detection, lockdown, break-glass and audit replay:
 
 ```powershell
 mvn test
@@ -92,6 +105,40 @@ mvn test
    - Event logged as `ACCOUNT_INACTIVE_ACCESS_ATTEMPT`.
 6. `SecurityAnomalyDetectionTest`:
    - 3 consecutive `ACCESS_DENIED` events trigger automatic `SECURITY_ALERT` insertion.
+7. `AuthorizationAndBiometricHardeningTest`:
+   - A revoked grant is rejected on the next download; an `EDIT` grant downgraded to `READ` is rejected on the next update.
+   - The administrator's ACL override still requires a live face; a descriptor outside the strict distance ceiling, a replayed challenge and a challenge bound to another action are all rejected.
+8. `SystemLockdownAndAuditReplayTest`:
+   - The kill switch freezes non-admin traffic with `503 SYSTEM_LOCKDOWN` while administrators keep the incident console.
+   - Action Replay returns the `pre_state` / `post_state` snapshot pair and the computed field-level diff.
+9. `BreakGlassDeclarationTest`:
+   - A declaration writes a `BREAK_GLASS_ACCESS` row with the justification, the forwarded client IP and a `pre_state` document snapshot; `post_state` stays empty.
+   - The declaration does not substitute for the face gate (the follow-up download is still `403` without proof), non-admins get `403`, short justifications `400`, and an unknown document `404` with no evidence row.
+
+---
+
+## 🧹 Fresh Reset & Database Maintenance
+
+| Script | Purpose |
+| :--- | :--- |
+| `src/main/resources/db/reset_fresh_state.sql` | Purges every application row (identities, faces, documents, ACLs, biometric challenges, the whole WORM trail, `system_settings`) and rewinds any `AUTO_INCREMENT` counter to `1`. Schema, indexes, ENUMs and the WORM triggers stay in place. |
+| `src/main/resources/db/migration_v7_break_glass_audit.sql` | Appends `BREAK_GLASS_ACCESS` to the `audit_logs.action` ENUM. Idempotent; apply before starting a build that declares break-glass. |
+
+```powershell
+# 1. backup, 2. migrate, 3. purge  (details and safety notes in RUNBOOK.md)
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe" -u root -p trustvault --routines --triggers --result-file="backups\before_reset.sql"
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p trustvault -e "source src/main/resources/db/migration_v7_break_glass_audit.sql"
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p trustvault -e "source src/main/resources/db/reset_fresh_state.sql"
+```
+
+`TRUNCATE` is used deliberately for `audit_logs`: it is DDL, so the `BEFORE UPDATE` / `BEFORE DELETE`
+WORM triggers never fire, and the guard does not have to be dropped to clear compliance history.
+Anomaly counters are held in `AnomalyDetectionService` as well as `audit_logs`; restart the JVM after
+a reset to drop the in-memory map.
+
+**→ Full manual verification flow: [RUNBOOK.md](RUNBOOK.md)** — identity bootstrap with FaceID,
+uniqueness proof, upload and email-suggested sharing, anomaly generation, kill switch, break-glass and
+Action Replay.
 
 ---
 
@@ -116,3 +163,5 @@ mvn test
    ```
    http://localhost:8088
    ```
+   A fresh database has no accounts: register the first identity with a FaceID scan (see
+   [Identity Bootstrap](#-identity-bootstrap-no-seeded-accounts)).

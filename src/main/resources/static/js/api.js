@@ -218,6 +218,13 @@ const API = {
         return await this.request('/api/auth/biometric/face', { method: 'DELETE' });
     },
 
+    // Share recipient directory (autocomplete for the ACL modal)
+    async getShareCandidates(query = '') {
+        const q = new URLSearchParams();
+        if (query) q.append('query', query);
+        return await this.request(`/api/share-candidates?${q.toString()}`);
+    },
+
     // Permissions (ACL)
     async getPermissions(documentId) {
         return await this.request(`/api/documents/${documentId}/permissions`);
@@ -280,6 +287,14 @@ const API = {
     // Action Replay forensics
     async getAuditDiff(auditId) {
         return await this.request(`/api/admin/audit/${encodeURIComponent(auditId)}/diff`);
+    },
+
+    // Break-Glass emergency access declaration
+    async declareBreakGlass(documentId, reason) {
+        return await this.request('/api/admin/break-glass', {
+            method: 'POST',
+            body: JSON.stringify({ documentId, reason })
+        });
     },
 
     async changeUserRole(userId, role) {

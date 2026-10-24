@@ -187,7 +187,8 @@ public class DocumentService {
                 .orElseThrow(() -> new AccessDeniedException("Access Denied: Document not found."));
 
         // Only Owner or Admin can delete
-        if (!document.getOwner().getId().equals(user.getId()) && user.getRole() != Role.ADMIN) {
+        if (!document.getOwner().getId().equals(user.getId())
+                && (user.getRole() == null || !user.getRole().isAdministrator())) {
             Map<String, Object> details = new HashMap<>();
             details.put("reason", "IDOR Protection: Non-owner tried to delete document");
             auditLogService.logEvent(user, user.getEmail(), AuditAction.ACCESS_DENIED, documentId, clientIp, AuditStatus.FAILURE, details);
@@ -235,7 +236,7 @@ public class DocumentService {
                     continue;
                 }
                 results.add(toDocumentResponse(doc, p.getPermissionLevel().name(), p));
-            } else if (currentUser.getRole() == Role.ADMIN) {
+            } else if (currentUser.getRole() != null && currentUser.getRole().isAdministrator()) {
                 results.add(toDocumentResponse(doc, "ADMIN_VIEW", null));
             }
             // All other non-authorized documents are strictly excluded (No universal visibility)

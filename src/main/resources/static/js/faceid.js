@@ -271,13 +271,13 @@ const FaceIDEngine = (() => {
     function livenessInstruction(blinkDetected, liveMotion, quality, posePeak) {
         let action;
         if (blinkDetected) {
-            action = 'Blink detected. Hold still while the descriptor is captured...';
+            action = 'Liveness confirmed. Hold still while the descriptor is captured...';
         } else if (liveMotion) {
-            action = 'Motion detected. Hold still while the descriptor is captured...';
+            action = 'Head movement detected. Hold still while the descriptor is captured...';
         } else if (posePeak >= LIVENESS.MIN_POSE_DELTA) {
-            action = 'Movement seen — nod or turn your head slightly.';
+            action = 'Keep turning your head slightly left or right.';
         } else {
-            action = 'Blink once normally, or nod your head slightly.';
+            action = 'Turn your head slightly left or right to verify liveness.';
         }
         const hint = quality && !quality.ok && quality.issues.length ? ' ' + quality.issues[0] : '';
         return action + hint;
@@ -314,7 +314,7 @@ const FaceIDEngine = (() => {
         let baseline = null;
         let openBaseline = 0;
 
-        report({ stage: 'blink', blinkDetected: false, message: 'Liveness check: blink once, or nod your head slightly.' });
+        report({ stage: 'blink', blinkDetected: false, message: 'Liveness check: turn your head slightly left or right.' });
 
         while (Date.now() - startedAt < LIVENESS.WINDOW_MS) {
             if (typeof shouldStop === 'function' && shouldStop()) {
@@ -574,9 +574,9 @@ const FaceIDUX = (() => {
             return;
         }
         const tones = {
-            info: 'text-teal-300 bg-slate-950 border-teal-800',
-            error: 'text-rose-300 bg-rose-950/50 border-rose-800',
-            success: 'text-emerald-300 bg-emerald-950/50 border-emerald-800'
+            info: 'text-teal-700 bg-slate-50 border-teal-200',
+            error: 'text-rose-700 bg-rose-50 border-rose-200',
+            success: 'text-emerald-700 bg-emerald-50 border-emerald-200'
         };
         ui.status.textContent = text;
         ui.status.className = `text-xs font-mono p-2.5 rounded-xl border ${tones[tone] || tones.info}`;
@@ -681,7 +681,7 @@ const FaceIDUX = (() => {
                 }
                 busy = true;
                 ui.button.disabled = true;
-                setButtonState('Blink or nod', 'fa-eye');
+                setButtonState('Turn head', 'fa-eye');
                 try {
                     // 1. Anti-spoofing. A printed photo or a paused screen replay cannot blink,
                     //    nod or change its pixels, so no descriptor is generated until the
@@ -693,13 +693,13 @@ const FaceIDUX = (() => {
                         onProgress: update => {
                             setStatus(update.message, 'info');
                             ui.subtitle.textContent = update.message;
-                            setButtonState(update.blinkDetected ? 'Hold still…' : 'Blink or nod', 'fa-eye');
+                            setButtonState(update.blinkDetected ? 'Hold still…' : 'Turn head', 'fa-eye');
                         }
                     });
                     if (!liveness.passed) {
                         throw new Error(liveness.blinkDetected || liveness.posePeak > 0.02
-                            ? 'Liveness check failed: a blink or a small head movement opens the gate — try once more.'
-                            : 'Liveness check failed: no blink or head movement was detected. Static photos and screen replays are rejected.');
+                            ? 'Liveness check failed: a slight head turn opens the gate — try once more.'
+                            : 'Liveness check failed: no head movement was detected. Static photos and screen replays are rejected.');
                     }
 
                     // 2. Capture, guarded by the lighting / framing quality gate.
@@ -758,7 +758,7 @@ const FaceIDUX = (() => {
                         return;
                     }
                     resetButton(actionLabel);
-                    setStatus('Align your face within the frame, then press Scan Face. You will be asked to blink.', 'info');
+                    setStatus('Align your face within the frame, then press Scan Face. You will be asked to turn your head slightly left or right.', 'info');
                     guidanceTimer = setInterval(async () => {
                         if (busy || closed || Date.now() < suppressGuidanceUntil) {
                             return;
@@ -776,7 +776,7 @@ const FaceIDUX = (() => {
                                 setStatus(quality.issues[0], 'info');
                             } else {
                                 highlightGuide(true);
-                                setStatus('Face aligned and well lit. Press Scan Face, then blink once.', 'success');
+                                setStatus('Face aligned and well lit. Press Scan Face, then turn your head slightly left or right.', 'success');
                             }
                         } catch (error) {
                             setStatus(error.message || 'Face detection is unavailable.', 'error');
@@ -797,7 +797,7 @@ const FaceIDUX = (() => {
     function capture({ title, subtitle, actionLabel } = {}) {
         return prompt({
             title: title || 'Webcam FaceID Capture',
-            subtitle: subtitle || 'Look at the camera, blink once when prompted, then press Scan Face to capture your facial descriptor.',
+            subtitle: subtitle || 'Look at the camera, turn your head slightly left or right when prompted, then press Scan Face to capture your facial descriptor.',
             actionLabel: actionLabel || 'Scan Face',
             verify: async capture => capture
         });
@@ -819,7 +819,7 @@ const FaceIDUX = (() => {
 
         return prompt({
             title: 'Facial Verification',
-            subtitle: `Scan your enrolled face to ${purpose}. Press "Scan & Verify", then blink once when asked: a photo or a screen replay cannot pass the liveness check.`,
+            subtitle: `Scan your enrolled face to ${purpose}. Press "Scan & Verify", then turn your head slightly left or right when asked: a photo or a screen replay cannot pass the liveness check.`,
             actionLabel: 'Scan & Verify',
             verify: async capture => {
                 let challenge;
@@ -846,7 +846,7 @@ const FaceIDUX = (() => {
     function enroll(email, { mandatory = false } = {}) {
         return prompt({
             title: mandatory ? 'Mandatory Webcam FaceID Enrollment' : 'Enroll Face',
-            subtitle: 'Your account is bound to exactly one face. Press the button, then blink once when asked — a face already used by another account is rejected.',
+            subtitle: 'Your account is bound to exactly one face. Press the button, then turn your head slightly left or right when asked — a face already used by another account is rejected.',
             actionLabel: 'Capture & Bind Face',
             verify: async capture => {
                 const result = await API.registerFace(email, capture.descriptor, 'webcam');

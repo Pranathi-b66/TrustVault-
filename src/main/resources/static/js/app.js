@@ -9,6 +9,8 @@ let lockdownPollHandle = null;
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     initAuthListeners();
+    initShareDirectory();
+    initBreakGlass();
     checkExistingSession();
 });
 
@@ -19,17 +21,17 @@ function showToast(message, type = 'info') {
 
     const toast = document.createElement('div');
     const colors = {
-        success: 'bg-emerald-950 border-emerald-800 text-emerald-200',
-        error: 'bg-rose-950 border-rose-800 text-rose-200',
-        warning: 'bg-amber-950 border-amber-800 text-amber-200',
-        info: 'bg-slate-900 border-slate-700 text-slate-200'
+        success: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+        error: 'bg-rose-50 border-rose-200 text-rose-800',
+        warning: 'bg-amber-50 border-amber-200 text-amber-800',
+        info: 'bg-white border-slate-300 text-slate-800'
     };
 
     const icons = {
-        success: 'fa-circle-check text-emerald-400',
-        error: 'fa-circle-exclamation text-rose-400',
-        warning: 'fa-triangle-exclamation text-amber-400',
-        info: 'fa-circle-info text-cyan-400'
+        success: 'fa-circle-check text-emerald-600',
+        error: 'fa-circle-exclamation text-rose-600',
+        warning: 'fa-triangle-exclamation text-amber-600',
+        info: 'fa-circle-info text-cyan-600'
     };
 
     toast.className = `p-3 rounded-xl border shadow-xl flex items-center space-x-2 text-xs transition duration-300 transform translate-y-2 opacity-0 pointer-events-auto ${colors[type] || colors.info}`;
@@ -80,24 +82,17 @@ function escapeHtml(str) {
     }[tag] || tag));
 }
 
-// Quick demo switcher fill
-function quickFill(email, password) {
-    document.getElementById('login-email').value = email;
-    document.getElementById('login-password').value = password;
-    showToast(`Loaded ${email} credentials. Click Authenticate.`, 'info');
-}
-
 // Auth Tabs Switcher
 document.getElementById('tab-btn-login').addEventListener('click', () => {
-    document.getElementById('tab-btn-login').className = 'flex-1 py-2 text-emerald-400 border-b-2 border-emerald-400 font-semibold';
-    document.getElementById('tab-btn-register').className = 'flex-1 py-2 text-slate-400 hover:text-slate-200';
+    document.getElementById('tab-btn-login').className = 'flex-1 py-2 text-emerald-600 border-b-2 border-emerald-400 font-semibold';
+    document.getElementById('tab-btn-register').className = 'flex-1 py-2 text-slate-500 hover:text-slate-800';
     document.getElementById('form-login').classList.remove('hidden');
     document.getElementById('form-register').classList.add('hidden');
 });
 
 document.getElementById('tab-btn-register').addEventListener('click', () => {
-    document.getElementById('tab-btn-register').className = 'flex-1 py-2 text-teal-400 border-b-2 border-teal-400 font-semibold';
-    document.getElementById('tab-btn-login').className = 'flex-1 py-2 text-slate-400 hover:text-slate-200';
+    document.getElementById('tab-btn-register').className = 'flex-1 py-2 text-teal-600 border-b-2 border-teal-400 font-semibold';
+    document.getElementById('tab-btn-login').className = 'flex-1 py-2 text-slate-500 hover:text-slate-800';
     document.getElementById('form-register').classList.remove('hidden');
     document.getElementById('form-login').classList.add('hidden');
 });
@@ -153,7 +148,7 @@ function initAuthListeners() {
             showToast('Zero-Trust Policy: align your face inside the oval to bind this account.', 'info');
             const scan = await FaceIDUX.capture({
                 title: 'Mandatory Webcam FaceID Enrollment',
-                subtitle: 'Your account is bound to exactly one face. Align your face inside the oval, blink once when prompted to prove you are live, then press Scan Face; a face already registered to another account is rejected.',
+                subtitle: 'Your account is bound to exactly one face. Align your face inside the oval, turn your head slightly left or right when prompted to prove you are live, then press Scan Face; a face already registered to another account is rejected.',
                 actionLabel: 'Scan Face & Register'
             });
 
@@ -218,30 +213,23 @@ function renderDashboard(user) {
     const roleBadge = document.getElementById('nav-user-role-badge');
     roleBadge.textContent = user.role;
 
-    if (user.role === 'ADMIN') {
-        roleBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800';
-        document.getElementById('nav-tab-admin').classList.remove('hidden');
-    } else if (user.role === 'OWNER') {
-        roleBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider bg-emerald-950 text-emerald-300 border border-emerald-800';
-        document.getElementById('nav-tab-admin').classList.add('hidden');
-    } else {
-        roleBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider bg-cyan-950 text-cyan-300 border border-cyan-800';
-        document.getElementById('nav-tab-admin').classList.add('hidden');
-    }
+    const administrator = user.role === 'ADMIN';
+    const adminTab = document.getElementById('nav-tab-admin');
 
-    // Default tab based on role
-    if (user.role === 'VIEWER') {
-        switchTab('shared');
-    } else if (user.role === 'ADMIN') {
+    if (administrator) {
+        roleBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200';
+        adminTab.classList.remove('hidden');
+        // ADMIN lands on the security console; the kill-switch state is polled so a peer's
+        // containment action shows up here without a reload.
         switchTab('admin');
-    } else {
-        switchTab('owned');
-    }
-
-    // Admins keep the kill-switch state fresh so a peer's containment action is visible here.
-    if (user.role === 'ADMIN') {
         startLockdownPolling();
     } else {
+        // OWNER and VIEWER are the same vault baseline: identical badge treatment, identical
+        // tabs, identical actions. Only document position (owner / live grant) decides what a
+        // caller may touch, never the label on the badge.
+        roleBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200';
+        adminTab.classList.add('hidden');
+        switchTab('owned');
         stopLockdownPolling();
     }
 }
@@ -257,10 +245,10 @@ function switchTab(tab) {
         if (!btn || !content) return;
 
         if (t === tab) {
-            btn.className = 'px-4 py-2 text-sm font-semibold rounded-xl bg-slate-800 text-emerald-400 border border-emerald-800/50 flex items-center space-x-2';
+            btn.className = 'px-4 py-2 text-sm font-semibold rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center space-x-2';
             content.classList.remove('hidden');
         } else {
-            btn.className = 'px-4 py-2 text-sm font-semibold rounded-xl bg-slate-900/60 hover:bg-slate-800 text-slate-400 border border-transparent flex items-center space-x-2';
+            btn.className = 'px-4 py-2 text-sm font-semibold rounded-xl bg-transparent hover:bg-slate-100 text-slate-500 border border-transparent flex items-center space-x-2';
             content.classList.add('hidden');
         }
     });
@@ -285,39 +273,39 @@ async function loadOwnedDocuments() {
         }
 
         tbody.innerHTML = docs.map(doc => `
-            <tr class="hover:bg-slate-950/40 transition">
-                <td class="px-4 py-3 font-medium text-slate-100 flex items-center space-x-2">
-                    <i class="fa-solid fa-file-shield text-emerald-400"></i>
+            <tr class="hover:bg-slate-50 transition">
+                <td class="px-4 py-3 font-medium text-slate-900 flex items-center space-x-2">
+                    <i class="fa-solid fa-file-shield text-emerald-600"></i>
                     <span>${escapeHtml(doc.title)}</span>
                 </td>
                 <td class="px-4 py-3">
-                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(doc.category)}</span>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-300">${escapeHtml(doc.category)}</span>
                 </td>
-                <td class="px-4 py-3 font-mono text-xs text-slate-400">${formatBytes(doc.fileSizeBytes)}</td>
-                <td class="px-4 py-3 font-mono text-xs text-slate-400">${escapeHtml(doc.mimeType)}</td>
-                <td class="px-4 py-3 text-xs text-slate-400">${formatDate(doc.createdAt)}</td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-500">${formatBytes(doc.fileSizeBytes)}</td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-500">${escapeHtml(doc.mimeType)}</td>
+                <td class="px-4 py-3 text-xs text-slate-500">${formatDate(doc.createdAt)}</td>
                 <td class="px-4 py-3 text-right space-x-2">
                     <button onclick="openEditModal('${doc.id}', '${escapeHtml(doc.title)}', '${escapeHtml(doc.category)}')"
-                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 transition">
+                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-cyan-50 text-cyan-700 border border-cyan-200 hover:bg-cyan-100 transition">
                         <i class="fa-solid fa-pen-to-square mr-1"></i> Edit
                     </button>
                     <button onclick="openPermissionsModal('${doc.id}', '${escapeHtml(doc.title)}')"
-                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-950 text-teal-300 border border-teal-800 hover:bg-teal-900 transition">
+                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 transition">
                         <i class="fa-solid fa-user-plus mr-1"></i> Share & Burn
                     </button>
                     <button onclick="triggerFaceDownload('${doc.id}', '${escapeHtml(doc.title)}')"
-                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 transition">
+                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition">
                         <i class="fa-solid fa-camera mr-1"></i> Download
                     </button>
                     <button onclick="deleteDoc('${doc.id}')"
-                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-rose-950/60 text-rose-300 border border-rose-800 hover:bg-rose-900 transition">
+                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </td>
             </tr>
         `).join('');
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-400">Failed to load assets: ${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-600">Failed to load assets: ${escapeHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -339,27 +327,27 @@ async function loadSharedDocuments() {
             let burnBadge = '<span class="text-xs text-slate-500">Unlimited</span>';
             if (doc.maxViews !== null && doc.maxViews !== undefined) {
                 const remaining = Math.max(0, doc.maxViews - (doc.viewsCount || 0));
-                burnBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                burnBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200">
                     <i class="fa-solid fa-fire mr-1 text-amber-500"></i> ${remaining}/${doc.maxViews} views left
                 </span>`;
             }
 
             let expiryBadge = '<span class="text-xs text-slate-500">Permanent</span>';
             if (doc.expiresAt) {
-                expiryBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-800">
+                expiryBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-50 text-cyan-700 border border-cyan-200">
                     <i class="fa-regular fa-clock mr-1"></i> ${formatDate(doc.expiresAt)}
                 </span>`;
             }
 
             return `
-                <tr class="hover:bg-slate-950/40 transition">
-                    <td class="px-4 py-3 font-medium text-slate-100 flex items-center space-x-2">
-                        <i class="fa-solid fa-file-lines text-teal-400"></i>
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="px-4 py-3 font-medium text-slate-900 flex items-center space-x-2">
+                        <i class="fa-solid fa-file-lines text-teal-600"></i>
                         <span>${escapeHtml(doc.title)}</span>
                     </td>
-                    <td class="px-4 py-3 text-xs text-slate-400 font-mono">${escapeHtml(doc.ownerEmail)}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500 font-mono">${escapeHtml(doc.ownerEmail)}</td>
                     <td class="px-4 py-3">
-                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${doc.effectivePermission === 'EDIT' ? 'bg-indigo-950 text-indigo-300 border border-indigo-800' : 'bg-slate-800 text-slate-300 border border-slate-700'}">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${doc.effectivePermission === 'EDIT' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-700 border border-slate-300'}">
                             ${escapeHtml(doc.effectivePermission)}
                         </span>
                     </td>
@@ -368,7 +356,7 @@ async function loadSharedDocuments() {
                     <td class="px-4 py-3 text-right space-x-2 flex justify-end">
                         ${doc.effectivePermission === 'EDIT' ? `
                             <button onclick="openEditModal('${doc.id}', '${escapeHtml(doc.title)}', '${escapeHtml(doc.category)}')"
-                                    class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 transition">
+                                    class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-cyan-50 text-cyan-700 border border-cyan-200 hover:bg-cyan-100 transition">
                                 <i class="fa-solid fa-pen-to-square mr-1"></i> Edit
                             </button>
                         ` : ''}
@@ -382,7 +370,7 @@ async function loadSharedDocuments() {
             `;
         }).join('');
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-400">Error: ${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-600">Error: ${escapeHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -404,22 +392,22 @@ document.getElementById('form-search-docs').addEventListener('submit', async (e)
         }
 
         tbody.innerHTML = results.map(doc => `
-            <tr class="hover:bg-slate-950/40 transition">
-                <td class="px-4 py-3 font-medium text-slate-100">${escapeHtml(doc.title)}</td>
-                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(doc.category)}</span></td>
-                <td class="px-4 py-3 text-xs text-slate-400 font-mono">${escapeHtml(doc.ownerEmail)}</td>
-                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">${escapeHtml(doc.effectivePermission)}</span></td>
-                <td class="px-4 py-3 text-xs text-slate-400">${formatDate(doc.createdAt)}</td>
+            <tr class="hover:bg-slate-50 transition">
+                <td class="px-4 py-3 font-medium text-slate-900">${escapeHtml(doc.title)}</td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 text-slate-700 border border-slate-300">${escapeHtml(doc.category)}</span></td>
+                <td class="px-4 py-3 text-xs text-slate-500 font-mono">${escapeHtml(doc.ownerEmail)}</td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">${escapeHtml(doc.effectivePermission)}</span></td>
+                <td class="px-4 py-3 text-xs text-slate-500">${formatDate(doc.createdAt)}</td>
                 <td class="px-4 py-3 text-right">
                     <button onclick="triggerFaceDownload('${doc.id}', '${escapeHtml(doc.title)}')"
-                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-950 text-teal-300 border border-teal-800 hover:bg-teal-900 transition">
+                            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 transition">
                         <i class="fa-solid fa-camera mr-1"></i> Download
                     </button>
                 </td>
             </tr>
         `).join('');
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-600">${escapeHtml(err.message)}</td></tr>`;
     }
 });
 
@@ -479,8 +467,8 @@ function applyLockdownUi(status) {
     if (chip) {
         chip.textContent = enabled ? 'LOCKED DOWN' : 'OPERATIONAL';
         chip.className = enabled
-            ? 'px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-widest bg-rose-950 text-rose-300 border border-rose-700'
-            : 'px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-widest bg-emerald-950 text-emerald-300 border border-emerald-800';
+            ? 'px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-widest bg-rose-50 text-rose-700 border border-rose-300'
+            : 'px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-widest bg-emerald-50 text-emerald-700 border border-emerald-200';
     }
 
     const btn = document.getElementById('btn-toggle-lockdown');
@@ -597,6 +585,92 @@ async function toggleLockdown() {
     }
 }
 
+// ==============================================================
+// Break-Glass Emergency Access (declaration on the WORM trail)
+// ==============================================================
+// The declaration never widens rights: it timestamps intent before the emergency read and hands
+// the administrator the evidence row id. The follow-up download still runs the live face gate.
+let breakGlassState = null;
+
+function initBreakGlass() {
+    const form = document.getElementById('form-break-glass');
+    if (!form) return;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const me = API.getUser();
+        if (!me || me.role !== 'ADMIN') {
+            showToast('Break-glass declarations are restricted to administrators.', 'error');
+            return;
+        }
+
+        const docInput = document.getElementById('break-glass-doc');
+        const reasonInput = document.getElementById('break-glass-reason');
+        const button = document.getElementById('btn-declare-break-glass');
+
+        const documentId = docInput.value.trim();
+        const reason = reasonInput.value.trim();
+
+        if (!documentId) {
+            showToast('Enter the document id you need emergency access to.', 'warning');
+            docInput.focus();
+            return;
+        }
+        if (reason.length < 10) {
+            showToast('A justification of at least 10 characters is required for the evidence trail.', 'warning');
+            reasonInput.focus();
+            return;
+        }
+
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Declaring...';
+        }
+
+        try {
+            const result = await API.declareBreakGlass(documentId, reason);
+            breakGlassState = result;
+            renderBreakGlassResult(result);
+            reasonInput.value = '';
+            showToast(`Break-glass declared for "${result.title}". Evidence row ${result.auditLogId}.`, 'info');
+            // The declaration is itself an audit event, so refresh the console rather than waiting
+            // for the next manual reload.
+            loadAuditLogs();
+            loadAdminStats();
+        } catch (err) {
+            showToast(`Declaration failed: ${err.message}`, 'error');
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '<i class="fa-solid fa-unlock-keyhole mr-1"></i> Declare Access';
+            }
+        }
+    });
+
+    const streamButton = document.getElementById('btn-break-glass-stream');
+    if (streamButton) {
+        streamButton.addEventListener('click', async () => {
+            if (!breakGlassState) return;
+            const { documentId, title } = breakGlassState;
+            await triggerFaceDownload(documentId, title);
+            // The read is audited separately; surface it immediately in the trail inspector.
+            loadAuditLogs();
+        });
+    }
+}
+
+function renderBreakGlassResult(result) {
+    const panel = document.getElementById('break-glass-result');
+    if (!panel) return;
+
+    document.getElementById('break-glass-result-title').textContent =
+        result.category ? `${result.title} (${result.category})` : result.title;
+    document.getElementById('break-glass-result-owner').textContent = result.ownerEmail || '—';
+    document.getElementById('break-glass-result-audit').textContent = result.auditLogId || '—';
+    document.getElementById('break-glass-result-time').textContent = formatDate(result.declaredAt);
+    panel.classList.remove('hidden');
+}
+
 // Admin Users & Instant Offboarding Kill Switch
 async function loadAdminUsers() {
     const tbody = document.getElementById('table-admin-users');
@@ -609,32 +683,32 @@ async function loadAdminUsers() {
             const isActive = u.status === 'ACTIVE';
             const isSelf = !!(me && me.email === u.email);
             const roleCell = isSelf
-                ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-purple-950 text-purple-300 border border-purple-800">${escapeHtml(u.role)}</span>
+                ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-purple-50 text-purple-700 border border-purple-200">${escapeHtml(u.role)}</span>
                    <span class="text-[10px] text-slate-500 ml-1">(you)</span>`
                 : `<select onchange="changeUserRole(this, '${u.id}', '${escapeHtml(u.role)}')"
                            title="Change privilege tier (audited with before/after snapshots)"
-                           class="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[10px] font-bold font-mono text-slate-300 focus:outline-none focus:border-cyan-500">
+                           class="px-2 py-1 rounded-lg bg-slate-50 border border-slate-300 text-[10px] font-bold font-mono text-slate-700 focus:outline-none focus:border-cyan-500">
                        ${['ADMIN', 'OWNER', 'VIEWER'].map(r => `<option value="${r}"${r === u.role ? ' selected' : ''}>${r}</option>`).join('')}
                    </select>`;
             return `
-                <tr class="hover:bg-slate-950/60 transition">
-                    <td class="px-4 py-3 font-medium text-slate-100">${escapeHtml(u.fullName)}</td>
-                    <td class="px-4 py-3 font-mono text-slate-400">${escapeHtml(u.email)}</td>
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="px-4 py-3 font-medium text-slate-900">${escapeHtml(u.fullName)}</td>
+                    <td class="px-4 py-3 font-mono text-slate-500">${escapeHtml(u.email)}</td>
                     <td class="px-4 py-3">${roleCell}</td>
                     <td class="px-4 py-3">
-                        <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isActive ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isActive ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">
                             ${isActive ? 'ACTIVE' : 'INACTIVE'}
                         </span>
                     </td>
                     <td class="px-4 py-3 text-right">
                         ${isActive ? `
                             <button onclick="triggerOffboarding('${u.id}', '${escapeHtml(u.email)}')"
-                                    class="px-2.5 py-1 rounded bg-rose-950 text-rose-300 border border-rose-800 hover:bg-rose-900 text-xs font-semibold transition">
+                                    class="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 text-xs font-semibold transition">
                                 <i class="fa-solid fa-ban mr-1"></i> Deactivate (Kill Switch)
                             </button>
                         ` : `
                             <button onclick="triggerReactivate('${u.id}', '${escapeHtml(u.email)}')"
-                                    class="px-2.5 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 text-xs font-semibold transition">
+                                    class="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs font-semibold transition">
                                 <i class="fa-solid fa-check mr-1"></i> Reactivate
                             </button>
                         `}
@@ -643,7 +717,7 @@ async function loadAdminUsers() {
             `;
         }).join('');
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-rose-600">${escapeHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -715,29 +789,30 @@ async function loadAuditLogs() {
 
         tbody.innerHTML = logs.map(l => {
             const isDenial = l.action === 'ACCESS_DENIED' || l.action === 'SECURITY_ALERT' || l.action === 'ACCOUNT_INACTIVE_ACCESS_ATTEMPT';
-            let actionClass = 'text-teal-400';
-            if (isDenial) actionClass = 'text-rose-400 font-bold';
-            else if (l.action === 'UPLOAD') actionClass = 'text-emerald-400';
-            else if (l.action === 'SYSTEM_LOCKDOWN_TRIGGERED') actionClass = 'text-rose-300 font-black';
-            else if (l.action === 'SYSTEM_LOCKDOWN_LIFTED') actionClass = 'text-emerald-300 font-bold';
-            else if (l.action === 'ROLE_CHANGED') actionClass = 'text-purple-300 font-bold';
+            let actionClass = 'text-teal-600';
+            if (isDenial) actionClass = 'text-rose-600 font-bold';
+            else if (l.action === 'UPLOAD') actionClass = 'text-emerald-600';
+            else if (l.action === 'SYSTEM_LOCKDOWN_TRIGGERED') actionClass = 'text-rose-700 font-black';
+            else if (l.action === 'SYSTEM_LOCKDOWN_LIFTED') actionClass = 'text-emerald-700 font-bold';
+            else if (l.action === 'ROLE_CHANGED') actionClass = 'text-purple-700 font-bold';
+            else if (l.action === 'BREAK_GLASS_ACCESS') actionClass = 'text-amber-700 font-black';
 
-            const statusClass = l.status === 'SUCCESS' ? 'text-emerald-400' : 'text-rose-400 font-bold';
+            const statusClass = l.status === 'SUCCESS' ? 'text-emerald-600' : 'text-rose-600 font-bold';
 
             return `
-                <tr class="hover:bg-slate-950/70 transition">
-                    <td class="px-3 py-2 text-slate-400 whitespace-nowrap">${formatDate(l.timestamp)}</td>
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="px-3 py-2 text-slate-500 whitespace-nowrap">${formatDate(l.timestamp)}</td>
                     <td class="px-3 py-2 ${actionClass}">${escapeHtml(l.action)}</td>
-                    <td class="px-3 py-2 text-slate-300 font-semibold">${escapeHtml(l.userEmail)}</td>
-                    <td class="px-3 py-2 text-slate-400">${escapeHtml(l.ipAddress)}</td>
+                    <td class="px-3 py-2 text-slate-700 font-semibold">${escapeHtml(l.userEmail)}</td>
+                    <td class="px-3 py-2 text-slate-500">${escapeHtml(l.ipAddress)}</td>
                     <td class="px-3 py-2 ${statusClass}">${escapeHtml(l.status)}</td>
-                    <td class="px-3 py-2 text-slate-400 max-w-xs truncate" title="${escapeHtml(l.details || '')}">
+                    <td class="px-3 py-2 text-slate-500 max-w-xs truncate" title="${escapeHtml(l.details || '')}">
                         ${escapeHtml(l.details || '—')}
                     </td>
                     <td class="px-3 py-2 text-right">
                         <button onclick="openAuditDiff('${l.id}')"
                                 title="Inspect Action Replay: before/after state diff"
-                                class="px-2.5 py-1 rounded-lg bg-teal-950 text-teal-300 border border-teal-800 hover:bg-teal-900 text-[10px] font-semibold transition">
+                                class="px-2.5 py-1 rounded-lg bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 text-[10px] font-semibold transition">
                             <i class="fa-solid fa-clock-rotate-left mr-1"></i> Replay
                         </button>
                     </td>
@@ -745,7 +820,7 @@ async function loadAuditLogs() {
             `;
         }).join('');
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-rose-600">${escapeHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -756,7 +831,7 @@ async function loadSecurityAlerts() {
         const alerts = await API.getSecurityAlerts();
         if (alerts.length === 0) {
             container.innerHTML = `
-                <div class="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400">
+                <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500">
                     No security anomalies detected. System operating within zero-trust parameters.
                 </div>
             `;
@@ -764,15 +839,15 @@ async function loadSecurityAlerts() {
         }
 
         container.innerHTML = alerts.map(a => `
-            <div class="p-3 bg-rose-950/50 rounded-xl border border-rose-800 flex items-start space-x-3 text-xs">
-                <i class="fa-solid fa-triangle-exclamation text-rose-400 text-base mt-0.5"></i>
+            <div class="p-3 bg-rose-50 rounded-xl border border-rose-200 flex items-start space-x-3 text-xs">
+                <i class="fa-solid fa-triangle-exclamation text-rose-600 text-base mt-0.5"></i>
                 <div class="flex-1">
                     <div class="flex items-center justify-between">
-                        <span class="font-bold text-rose-300 uppercase tracking-wider font-mono">SECURITY ANOMALY: BRUTE-FORCE / IDOR ENUMERATION</span>
-                        <span class="text-rose-400/80 font-mono text-[10px]">${formatDate(a.timestamp)}</span>
+                        <span class="font-bold text-rose-700 uppercase tracking-wider font-mono">SECURITY ANOMALY: BRUTE-FORCE / IDOR ENUMERATION</span>
+                        <span class="text-rose-600/80 font-mono text-[10px]">${formatDate(a.timestamp)}</span>
                     </div>
-                    <p class="text-rose-200 mt-0.5">Source: <strong class="font-mono text-white">${escapeHtml(a.userEmail)}</strong> (IP: ${escapeHtml(a.ipAddress)})</p>
-                    <div class="text-[11px] font-mono text-rose-300/90 bg-rose-950/80 p-2 rounded-lg mt-1 border border-rose-900/60">
+                    <p class="text-rose-800 mt-0.5">Source: <strong class="font-mono text-slate-900">${escapeHtml(a.userEmail)}</strong> (IP: ${escapeHtml(a.ipAddress)})</p>
+                    <div class="text-[11px] font-mono text-rose-700/90 bg-rose-100 p-2 rounded-lg mt-1 border border-rose-200">
                         ${escapeHtml(a.details || '{}')}
                     </div>
                 </div>
@@ -807,7 +882,7 @@ async function openAuditDiff(auditId) {
     } catch (err) {
         document.getElementById('diff-audit-meta').textContent = 'Forensic replay unavailable';
         document.getElementById('table-diff-changes').innerHTML =
-            `<tr><td colspan="4" class="px-3 py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+            `<tr><td colspan="4" class="px-3 py-6 text-center text-rose-600">${escapeHtml(err.message)}</td></tr>`;
         showToast(err.message, 'error');
     }
 }
@@ -823,14 +898,14 @@ function renderAuditDiff(diff) {
 
     const summary = diff.summary || {};
     const chips = [
-        { label: 'Modified', value: summary.modified, cls: 'bg-amber-950 text-amber-300 border-amber-800' },
-        { label: 'Added', value: summary.added, cls: 'bg-emerald-950 text-emerald-300 border-emerald-800' },
-        { label: 'Removed', value: summary.removed, cls: 'bg-rose-950 text-rose-300 border-rose-800' },
-        { label: 'Fields', value: summary.total, cls: 'bg-slate-800 text-slate-300 border-slate-700' }
+        { label: 'Modified', value: summary.modified, cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+        { label: 'Added', value: summary.added, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+        { label: 'Removed', value: summary.removed, cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+        { label: 'Fields', value: summary.total, cls: 'bg-slate-100 text-slate-700 border-slate-300' }
     ];
     document.getElementById('diff-summary').innerHTML = `
-        <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border bg-indigo-950 text-indigo-300 border-indigo-800">${escapeHtml(diff.action || '—')}</span>
-        <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono border ${diff.status === 'SUCCESS' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-rose-950 text-rose-300 border-rose-800'}">${escapeHtml(diff.status || '—')}</span>
+        <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border bg-indigo-50 text-indigo-700 border-indigo-200">${escapeHtml(diff.action || '—')}</span>
+        <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono border ${diff.status === 'SUCCESS' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}">${escapeHtml(diff.status || '—')}</span>
         ${chips.map(c => `
             <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border ${c.cls}">
                 ${c.label}: ${Number.isFinite(c.value) ? c.value : 0}
@@ -851,16 +926,16 @@ function renderAuditDiff(diff) {
         tbody.innerHTML = changes.map(c => {
             const changeType = c.changeType || 'MODIFIED';
             const badgeClass = changeType === 'ADDED'
-                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 : changeType === 'REMOVED'
-                    ? 'bg-rose-950 text-rose-300 border-rose-800'
-                    : 'bg-amber-950 text-amber-300 border-amber-800';
+                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200';
 
             return `
-                <tr class="hover:bg-slate-950/60 transition">
-                    <td class="px-3 py-2 text-slate-200 whitespace-nowrap">${escapeHtml(c.field)}</td>
-                    <td class="px-3 py-2 text-rose-300/90 break-all">${formatDiffValue(c.before)}</td>
-                    <td class="px-3 py-2 text-emerald-300/90 break-all">${formatDiffValue(c.after)}</td>
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="px-3 py-2 text-slate-800 whitespace-nowrap">${escapeHtml(c.field)}</td>
+                    <td class="px-3 py-2 text-rose-700/90 break-all">${formatDiffValue(c.before)}</td>
+                    <td class="px-3 py-2 text-emerald-700/90 break-all">${formatDiffValue(c.after)}</td>
                     <td class="px-3 py-2">
                         <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${badgeClass}">${escapeHtml(changeType)}</span>
                     </td>
@@ -874,9 +949,9 @@ function renderAuditDiff(diff) {
 }
 
 function formatDiffValue(value) {
-    if (value === null || value === undefined) return '<span class="text-slate-600 italic">null</span>';
+    if (value === null || value === undefined) return '<span class="text-slate-400 italic">null</span>';
     if (typeof value === 'object') return escapeHtml(JSON.stringify(value));
-    if (value === '') return '<span class="text-slate-600 italic">"" empty</span>';
+    if (value === '') return '<span class="text-slate-400 italic">"" empty</span>';
     return escapeHtml(String(value));
 }
 
@@ -970,6 +1045,191 @@ async function deleteDoc(docId) {
     }
 }
 
+// ==============================================================
+// Share recipient directory (autocomplete for the ACL modal)
+// ==============================================================
+// The directory is a convenience over the ACL: the email field stays a free-text input, and a
+// grant is always authorised server-side by document ownership. Suggestions only remove typos.
+const SHARE_SUGGESTION_LIMIT = 8;
+let shareCandidates = [];
+let shareGrantedEmails = new Set();
+let shareSuggestionIndex = -1;
+let shareSuggestionRequest = 0;
+let shareSuggestionTimer = null;
+
+function shareSuggestionElements() {
+    return {
+        input: document.getElementById('grant-email'),
+        list: document.getElementById('grant-email-suggestions')
+    };
+}
+
+function initShareDirectory() {
+    const { input, list } = shareSuggestionElements();
+    if (!input || !list) return;
+
+    input.addEventListener('input', () => {
+        const term = input.value.trim();
+        clearTimeout(shareSuggestionTimer);
+        shareSuggestionTimer = setTimeout(() => loadShareCandidates(term), 160);
+    });
+
+    input.addEventListener('focus', () => {
+        if (shareCandidates.length) {
+            renderShareSuggestions();
+        } else {
+            loadShareCandidates(input.value.trim());
+        }
+    });
+
+    input.addEventListener('keydown', (event) => {
+        const items = visibleShareCandidates();
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            if (items.length === 0) return;
+            event.preventDefault();
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            highlightShareSuggestion((shareSuggestionIndex + step + items.length) % items.length);
+            return;
+        }
+        if (event.key === 'Escape') {
+            closeShareSuggestions();
+            return;
+        }
+        if (event.key === 'Enter' && shareSuggestionIndex >= 0 && items[shareSuggestionIndex]) {
+            // Selecting a suggestion must not submit the ACL form.
+            event.preventDefault();
+            selectShareSuggestion(items[shareSuggestionIndex].email);
+        }
+    });
+
+    // Delay the close so a mousedown/click on a suggestion still lands.
+    input.addEventListener('blur', () => setTimeout(closeShareSuggestions, 150));
+
+    list.addEventListener('mousedown', (event) => event.preventDefault());
+    list.addEventListener('click', (event) => {
+        const option = event.target.closest('[data-share-email]');
+        if (option) {
+            selectShareSuggestion(option.getAttribute('data-share-email'));
+        }
+    });
+}
+
+async function loadShareCandidates(query) {
+    const { list } = shareSuggestionElements();
+    if (!list) return;
+
+    const requestId = ++shareSuggestionRequest;
+    try {
+        const candidates = await API.getShareCandidates(query);
+        if (requestId !== shareSuggestionRequest) return; // a newer keystroke already answered
+        shareCandidates = Array.isArray(candidates) ? candidates : [];
+        shareSuggestionIndex = -1;
+        // Prefetching with the modal closed (or the field unfocused) must not pop a dropdown;
+        // the focus handler renders the cached directory when the user actually enters the field.
+        const { input } = shareSuggestionElements();
+        if (input && document.activeElement === input) {
+            renderShareSuggestions();
+        }
+    } catch (err) {
+        if (requestId !== shareSuggestionRequest) return;
+        // The field remains a normal email input; a failed lookup must not block sharing.
+        shareCandidates = [];
+        closeShareSuggestions();
+    }
+}
+
+function visibleShareCandidates() {
+    const selfEmail = ((API.getUser() || {}).email || '').toLowerCase();
+    return shareCandidates
+        .filter(candidate => {
+            const email = (candidate.email || '').toLowerCase();
+            return email && email !== selfEmail && !shareGrantedEmails.has(email);
+        })
+        .slice(0, SHARE_SUGGESTION_LIMIT);
+}
+
+function renderShareSuggestions() {
+    const { input, list } = shareSuggestionElements();
+    if (!input || !list) return;
+
+    const items = visibleShareCandidates();
+    if (items.length === 0) {
+        // An empty directory is only worth a message once the user is actually searching.
+        if (!input.value.trim()) {
+            closeShareSuggestions();
+            return;
+        }
+        list.innerHTML = '<div class="px-3 py-2.5 text-[11px] text-slate-500">No registered identity matches this search.</div>';
+        list.classList.remove('hidden');
+        input.setAttribute('aria-expanded', 'true');
+        return;
+    }
+
+    list.innerHTML = items.map((candidate, index) => {
+        const roleClass = candidate.role === 'ADMIN'
+            ? 'bg-purple-50 text-purple-700 border-purple-200'
+            : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        return `
+            <button type="button" role="option" id="share-option-${index}"
+                    data-share-index="${index}" data-share-email="${escapeHtml(candidate.email)}"
+                    class="w-full px-3 py-2 flex items-center justify-between gap-2 text-left border-b border-slate-200 last:border-0 hover:bg-slate-100 transition">
+                <span class="min-w-0">
+                    <span class="block text-[11px] text-slate-900 truncate">${escapeHtml(candidate.fullName || 'Unnamed identity')}</span>
+                    <span class="block text-[10px] font-mono text-slate-500 truncate">${escapeHtml(candidate.email)}</span>
+                </span>
+                <span class="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${roleClass}">${escapeHtml(candidate.role || '')}</span>
+            </button>
+        `;
+    }).join('');
+
+    list.classList.remove('hidden');
+    input.setAttribute('aria-expanded', 'true');
+    highlightShareSuggestion(shareSuggestionIndex);
+}
+
+function highlightShareSuggestion(index) {
+    const { input, list } = shareSuggestionElements();
+    if (!list) return;
+
+    const options = Array.from(list.querySelectorAll('[data-share-index]'));
+    options.forEach(option => option.classList.remove('bg-slate-100'));
+    shareSuggestionIndex = index;
+
+    if (index >= 0 && options[index]) {
+        options[index].classList.add('bg-slate-100');
+        options[index].scrollIntoView({ block: 'nearest' });
+        if (input) input.setAttribute('aria-activedescendant', options[index].id);
+    } else if (input) {
+        input.removeAttribute('aria-activedescendant');
+    }
+}
+
+function selectShareSuggestion(email) {
+    const { input } = shareSuggestionElements();
+    if (!input) return;
+    input.value = email;
+    closeShareSuggestions();
+    input.focus();
+}
+
+function closeShareSuggestions() {
+    const { input, list } = shareSuggestionElements();
+    if (list) list.classList.add('hidden');
+    if (input) {
+        input.setAttribute('aria-expanded', 'false');
+        input.removeAttribute('aria-activedescendant');
+    }
+    shareSuggestionIndex = -1;
+}
+
+function resetShareSuggestions() {
+    shareCandidates = [];
+    shareSuggestionRequest += 1;
+    closeShareSuggestions();
+    const { list } = shareSuggestionElements();
+    if (list) list.innerHTML = '';
+}
+
 // Permissions & ACL Modal
 async function openPermissionsModal(docId, docTitle) {
     currentActiveDocForPerms = docId;
@@ -979,11 +1239,17 @@ async function openPermissionsModal(docId, docTitle) {
     document.getElementById('grant-max-views').value = '';
     document.getElementById('grant-expires-at').value = '';
 
+    shareGrantedEmails = new Set();
+    resetShareSuggestions();
     loadDocPermissions(docId);
+    // Prefetch the directory so the first keystroke has suggestions ready, and so an owner can
+    // browse registered identities without typing at all.
+    loadShareCandidates('');
 }
 
 function closePermissionsModal() {
     document.getElementById('modal-permissions').classList.add('hidden');
+    closeShareSuggestions();
     currentActiveDocForPerms = null;
 }
 
@@ -993,6 +1259,12 @@ async function loadDocPermissions(docId) {
 
     try {
         const perms = await API.getPermissions(docId);
+        // Recipients that already hold a grant are removed from the suggestion list: re-granting
+        // is an UPDATE, and offering an existing grantee as a fresh suggestion is misleading.
+        shareGrantedEmails = new Set(perms.map(p => (p.userEmail || '').toLowerCase()));
+        if (document.getElementById('grant-email') === document.activeElement) {
+            renderShareSuggestions();
+        }
         if (perms.length === 0) {
             list.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">No ACL grants yet. This document is strictly private to the owner.</p>';
             return;
@@ -1003,32 +1275,32 @@ async function loadDocPermissions(docId) {
             const viewLimitReached = p.maxViews !== null && p.maxViews !== undefined && p.viewsCount >= p.maxViews;
             const permissionStatus = expired ? 'EXPIRED' : viewLimitReached ? 'VIEW LIMIT REACHED' : 'ACTIVE';
             const statusColor = permissionStatus === 'ACTIVE'
-                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                : 'bg-rose-950 text-rose-300 border-rose-800';
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-rose-50 text-rose-700 border-rose-200';
 
             return `
-            <div class="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
                 <div>
                     <div class="flex items-center space-x-2">
-                        <span class="font-bold text-slate-100">${escapeHtml(p.userFullName)}</span>
-                        <span class="text-slate-400 font-mono text-[11px]">(${escapeHtml(p.userEmail)})</span>
-                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(p.permissionLevel)}</span>
+                        <span class="font-bold text-slate-900">${escapeHtml(p.userFullName)}</span>
+                        <span class="text-slate-500 font-mono text-[11px]">(${escapeHtml(p.userEmail)})</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700 border border-slate-300">${escapeHtml(p.permissionLevel)}</span>
                         <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${statusColor}">${permissionStatus}</span>
                     </div>
-                    <div class="flex items-center space-x-3 text-[11px] text-slate-400 mt-1">
-                        ${p.maxViews !== null && p.maxViews !== undefined ? `<span class="text-amber-400 font-semibold"><i class="fa-solid fa-fire text-amber-500 mr-1"></i> Burn limit: ${p.viewsCount}/${p.maxViews} views consumed</span>` : '<span>Unlimited views</span>'}
-                        ${p.expiresAt ? `<span class="text-cyan-400 font-semibold"><i class="fa-regular fa-clock text-cyan-400 mr-1"></i> Exp: ${formatDate(p.expiresAt)}</span>` : ''}
+                    <div class="flex items-center space-x-3 text-[11px] text-slate-500 mt-1">
+                        ${p.maxViews !== null && p.maxViews !== undefined ? `<span class="text-amber-600 font-semibold"><i class="fa-solid fa-fire text-amber-500 mr-1"></i> Burn limit: ${p.viewsCount}/${p.maxViews} views consumed</span>` : '<span>Unlimited views</span>'}
+                        ${p.expiresAt ? `<span class="text-cyan-600 font-semibold"><i class="fa-regular fa-clock text-cyan-600 mr-1"></i> Exp: ${formatDate(p.expiresAt)}</span>` : ''}
                     </div>
                 </div>
                 <button onclick="revokePerm('${docId}', '${p.userId}', '${escapeHtml(p.userEmail)}')"
-                        class="px-2.5 py-1 bg-rose-950 text-rose-300 border border-rose-800 rounded-lg text-xs font-semibold hover:bg-rose-900 transition">
+                        class="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold hover:bg-rose-100 transition">
                     <i class="fa-solid fa-user-xmark mr-1"></i> Revoke
                 </button>
             </div>
         `;
         }).join('');
     } catch (err) {
-        list.innerHTML = `<p class="text-xs text-rose-400 text-center py-4">${escapeHtml(err.message)}</p>`;
+        list.innerHTML = `<p class="text-xs text-rose-600 text-center py-4">${escapeHtml(err.message)}</p>`;
     }
 }
 

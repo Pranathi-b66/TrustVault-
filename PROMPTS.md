@@ -195,3 +195,74 @@ Remove all standard WebAuthn/passkey and fingerprint implementations and replace
 > 1. Palette: White background (`#FFFFFF`), neutral subtle cards (`#F8FAFC`), soft borders (`#E2E8F0`), primary accent Royal/Navy Blue (`#1E40AF` / `#2563EB`), emerald green for security verification (`#10B981`), and crimson for alerts (`#EF4444`).
 > 2. FaceID Modal: Frosted glass overlay with a glowing royal blue oval scanner guide and real-time status text.
 > 3. Admin Tools: Clean side-by-side green/red diff viewer for Action Replay and a high-visibility toggle switch for the Emergency Kill Switch."
+
+---
+
+### Prompt 9.2: Share Email Autocomplete & Production Surface Cleanup
+> **Prompt:**
+> "Make the workspace indistinguishable from a production deployment:
+> 1. Remove every floating demo toggle, mock role switcher, and testing banner — including the quick-fill credential chips on the auth card — so no control implies a sandbox mode.
+> 2. Turn the grantee field of the sharing modal into an accessible combobox: query `GET /api/share-candidates?q=`, anchor a keyboard-navigable listbox directly beneath the input, and render each entry as name, email, and role badge.
+> 3. Bound the directory: active identities only, the caller excluded, at most 8 rows per query, and only `id`, `email`, `fullName`, `role` in the payload. Strip `%`, `_`, and `\` from the term so a crafted query can never widen the substring search into a registry dump.
+> 4. Keep the field free-text for external recipients, suppress the dropdown until the input is actually focused, and never surface an empty-state message for an empty query."
+
+---
+
+### Prompt 9.3: FaceID Liveness Copy Revision (Head-Turn)
+> **Prompt:**
+> "Revise the FaceID liveness wording across every user-facing surface:
+> 1. Replace all blink and nod instructions with one unambiguous phrase: 'Turn head slightly left or right'.
+> 2. Apply it to the camera overlay timeline, the Scan Face button label, the enrollment, authorization, and capture subtitles, and both success and failure messages.
+> 3. Restrict the change to copy — leave detector internals and thresholds untouched — then re-run `scripts/liveness-simulation.js` and `node --check` to prove the state machine and scripts still behave identically."
+
+---
+
+## 10. Data Lifecycle, Role Consolidation & Operational Readiness Prompts
+
+### Prompt 10.1: Complete Data Purge, WORM-Safe, and Sequence Reset
+> **Prompt:**
+> "Act as a DBA and produce an idempotent reset script for TrustVault:
+> 1. Purge users, biometric_templates, biometric_challenges, documents, document_permissions, audit_logs, and system_settings while foreign keys are disabled, truncating audit_logs with DDL because its append-only triggers reject DELETE.
+> 2. Cover tables that may not exist in every environment (`shared_permissions`, `pending_admin_actions`, `user_risk_scores`) by probing `information_schema` and preparing the statement dynamically.
+> 3. Reset every primary-key sequence to 1 through a cursor over `information_schema.TABLES`, not a concatenated statement list — a prepared statement carries exactly one statement. The schema uses UUID keys today, so the step is a no-op guard rather than a live counter.
+> 4. Finish with a UNION verification that prints the row count of every table, and document that the running JVM must restart so in-memory anomaly counters do not survive the purge."
+
+---
+
+### Prompt 10.2: Unified OWNER/VIEWER Vault Baseline
+> **Prompt:**
+> "Consolidate authorization roles without over-separating them:
+> 1. OWNER and VIEWER are not privilege tiers. Both hold the same vault baseline — upload, search, read, download, and management of the documents they own — and both may hold or receive ACL grants.
+> 2. What distinguishes two identities is their position relative to a document (owner row, live grant, or neither), resolved per transaction from the database rather than from the label.
+> 3. ADMIN is the only genuine separation: security console, kill switch, immutable-trail access, and ACL override. No document-workspace path may treat an administrator as a superior reader.
+> 4. Express the distinction with a single `isAdministrator()` helper and replace every `Role.ADMIN` comparison, so the rule cannot drift back into scattered equality checks."
+
+---
+
+### Prompt 10.3: Break-Glass Emergency Access (Evidence, Not Authorization)
+> **Prompt:**
+> "Add accountable emergency access without weakening any existing gate:
+> 1. Append `BREAK_GLASS_ACCESS` to the `audit_logs.action` enum through a standalone migration that can be applied to an existing database.
+> 2. Expose an admin-only `POST /api/admin/break-glass` taking `documentId` and a 10–500 character justification; record actor email, client IP, document id, owner, and reason on the WORM trail, and return the evidence row id.
+> 3. The declaration authorizes nothing: the emergency download that follows still requires a live face token, and burn-after-reading quotas still apply. Return `404` for an unknown document without writing evidence.
+> 4. Prove it with integration tests covering the evidence row, absent authorization, non-admin rejection, short justification rejection, and the 404 path."
+
+---
+
+### Prompt 10.4: Empty-Start Identity Bootstrap
+> **Prompt:**
+> "Guarantee that a purged database stays empty:
+> 1. Gate the demo account seeding behind `trustvault.bootstrap.seed-default-users=false` and skip it entirely when the flag is off.
+> 2. Create the first identity through the FaceID sign-up flow, choosing the administrator role at registration.
+> 3. Keep the seeded credentials out of the startup path unless the flag is explicitly enabled, so a fresh deployment has no known accounts."
+
+---
+
+### Prompt 10.5: Manual Verification Runbook for a Fresh System
+> **Prompt:**
+> "Author an operator runbook that takes a reset database to a verified end state:
+> 1. (a) Register an administrator and two members with FaceID enrollment, then prove 1-to-1 uniqueness by attempting a duplicate face and a duplicate email.
+> 2. (b) Upload documents, share one through the autocomplete modal, and confirm the burn-after-reading quota is consumed.
+> 3. (c) Trigger three consecutive face mismatches and an IDOR read to populate the anomaly feed and audit trail.
+> 4. (d) Exercise the kill switch, a break-glass declaration, and the Action Replay JSON diff.
+> 5. For every step, list the exact command or UI action, the expected response, and the expected audit action; target one real audit row with an UPDATE to show SQLSTATE 45000, and close with a troubleshooting table."

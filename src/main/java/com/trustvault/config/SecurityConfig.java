@@ -118,7 +118,9 @@ public class SecurityConfig {
                         "/error"
                 ).permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                .requestMatchers("/api/documents/**").authenticated()
+                // Both vault identities share this baseline: documents they own or are granted,
+                // and the recipient directory used by the sharing modal.
+                .requestMatchers("/api/documents/**", "/api/share-candidates").authenticated()
                 .anyRequest().authenticated()
             )
             .authenticationProvider(authenticationProvider())

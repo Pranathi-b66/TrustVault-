@@ -1,6 +1,5 @@
 package com.trustvault.security;
 
-import com.trustvault.entity.Role;
 import com.trustvault.service.SystemLockdownService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -104,7 +103,7 @@ public class SystemLockdownFilter extends OncePerRequestFilter {
             return false;
         }
         if (authentication.getPrincipal() instanceof UserPrincipal principal) {
-            return principal.getRole() == Role.ADMIN;
+            return principal.getRole() != null && principal.getRole().isAdministrator();
         }
         for (GrantedAuthority authority : authentication.getAuthorities()) {
             if ("ROLE_ADMIN".equals(authority.getAuthority())) {

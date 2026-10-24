@@ -38,6 +38,11 @@ public class PermissionService {
      * Determines the effective permission of a user on a document: "OWNER", "EDIT", "READ", or null.
      * Enforces Burn-After-Reading limits and expiration.
      *
+     * <p>Resolution is identity-neutral for the two vault roles: {@code OWNER} and {@code VIEWER}
+     * are evaluated by exactly the same rules, so a viewer who owns a document governs it and an
+     * owner who receives a grant consumes it like anyone else. Only the document's owner, an
+     * active ACL grant and an administrator override produce access.</p>
+     *
      * <p>An {@code ADMIN} keeps an unconditional override, but an <b>explicit</b> grant held by that
      * administrator still governs its own budget: a burn-after-reading link handed to an admin has
      * to burn like any other, otherwise the recipient's share is silently unlimited and the owner's
@@ -62,7 +67,7 @@ public class PermissionService {
         //    keep the console usable would be to trust the role cached in the caller's token.
         //    The override does not extend to the accounting of their own share, though: a grant
         //    they were explicitly given is consumed exactly as it would be for a viewer.
-        if (user.getRole() == Role.ADMIN) {
+        if (user.getRole() != null && user.getRole().isAdministrator()) {
             grantOpt.ifPresent(grant -> {
                 if (grant.getExpiresAt() != null && Instant.now().isAfter(grant.getExpiresAt())) {
                     burnGrant(document, user, grant, clientIp,
@@ -185,7 +190,7 @@ public class PermissionService {
         }
 
         // 3. ADMIN override, based on the role stored in the database right now.
-        if (liveUser.getRole() == Role.ADMIN) {
+        if (liveUser.getRole() != null && liveUser.getRole().isAdministrator()) {
             return "ADMIN";
         }
 
@@ -336,7 +341,8 @@ public class PermissionService {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found: " + documentId));
 
-        if (!document.getOwner().getId().equals(requester.getId()) && requester.getRole() != Role.ADMIN) {
+        if (!document.getOwner().getId().equals(requester.getId())
+                && (requester.getRole() == null || !requester.getRole().isAdministrator())) {
             Map<String, Object> details = new HashMap<>();
             details.put("reason", "Unauthorized attempt to view ACL table of document");
             auditLogService.logEvent(requester, requester.getEmail(), AuditAction.ACCESS_DENIED, documentId, clientIp, AuditStatus.FAILURE, details);
