@@ -23,6 +23,7 @@ services:
       # Kept separate from the JWT secret so rotating tokens cannot orphan sealed face descriptors.
       - key: TRUSTVAULT_FACE_ENCRYPTION_KEY
         generateValue: true
-      # Render's filesystem is ephemeral: uploaded documents survive only as long as the instance.
+      # Uploads are stored in MySQL (document_blobs) because this filesystem is ephemeral; the
+      # directory only remains readable for documents written by builds that predate that change.
       - key: TRUSTVAULT_UPLOAD_DIR
         value: /tmp/uploads

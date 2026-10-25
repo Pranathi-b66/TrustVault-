@@ -2,6 +2,7 @@ package com.trustvault.config;
 
 import com.trustvault.face.DuplicateFaceException;
 import com.trustvault.face.FaceVerificationException;
+import com.trustvault.service.StoredFileMissingException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -93,6 +94,19 @@ public class GlobalExceptionHandler {
         error.put("error", "Bad Request");
         error.put("message", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    @ExceptionHandler(StoredFileMissingException.class)
+    public ResponseEntity<Map<String, Object>> handleStoredFileMissing(StoredFileMissingException ex) {
+        // 410, not 404: the document row exists and stays readable as metadata, but the bytes
+        // behind it were lost to the old ephemeral filesystem and cannot be recovered.
+        Map<String, Object> error = new HashMap<>();
+        error.put("timestamp", Instant.now().toString());
+        error.put("status", HttpStatus.GONE.value());
+        error.put("error", "Gone");
+        error.put("code", StoredFileMissingException.CODE);
+        error.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.GONE).body(error);
     }
 
     @ExceptionHandler(IllegalStateException.class)

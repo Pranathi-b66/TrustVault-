@@ -1408,7 +1408,13 @@ async function triggerFaceDownload(docId, title) {
         if (currentTab === 'shared') loadSharedDocuments();
         if (currentTab === 'owned') loadOwnedDocuments();
     } catch (err) {
-        showToast(`Download blocked: ${err.message}`, 'error');
+        // A document whose bytes were lost to ephemeral storage needs the full sentence, not a
+        // "blocked" prefix: nothing about the download was refused.
+        if (err.code === 'DOCUMENT_FILE_MISSING') {
+            showToast(err.message, 'error');
+        } else {
+            showToast(`Download blocked: ${err.message}`, 'error');
+        }
         if (err.code === 'FACE_NOT_ENROLLED' && await promptFaceEnrollment(true)) {
             showToast('Face enrolled. Retry the download to continue.', 'info');
         }
