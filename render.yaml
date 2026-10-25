@@ -1,0 +1,28 @@
+# Render Blueprint. In the Render Dashboard: New > Blueprint, pick this repo, apply.
+services:
+  - type: web
+    name: trustvault
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      # Aiven MySQL requires TLS; sslMode=REQUIRED encrypts without a local truststore.
+      # Aiven must allow Render's egress IPs (0.0.0.0/0 on the free plan, since egress is dynamic).
+      - key: SPRING_DATASOURCE_URL
+        value: 'jdbc:mysql://mysql-3494e395-jr1a1209-9dfa.j.aivencloud.com:28942/trustvault?sslMode=REQUIRED&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8'
+      - key: SPRING_DATASOURCE_USERNAME
+        value: avnadmin
+      # Prompted once in the Render Dashboard; never stored in the repo.
+      - key: TRUSTVAULT_DB_PASSWORD
+        sync: false
+      - key: TRUSTVAULT_JWT_SECRET
+        generateValue: true
+      # Kept separate from the JWT secret so rotating tokens cannot orphan sealed face descriptors.
+      - key: TRUSTVAULT_FACE_ENCRYPTION_KEY
+        generateValue: true
+      # Render's filesystem is ephemeral: uploaded documents survive only as long as the instance.
+      - key: TRUSTVAULT_UPLOAD_DIR
+        value: /tmp/uploads

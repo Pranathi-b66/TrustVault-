@@ -5,6 +5,10 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-24'
 $repo = 'c:\Users\hp\Desktop\trustvalut'
 Set-Location $repo
 
+if (-not $env:TRUSTVAULT_DB_PASSWORD) {
+    throw 'TRUSTVAULT_DB_PASSWORD is not set. Export the Aiven database password in this shell before starting.'
+}
+
 Get-NetTCPConnection -LocalPort 8088 -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
     Write-Output "stopping pid $($_.OwningProcess) on 8088"
     Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue

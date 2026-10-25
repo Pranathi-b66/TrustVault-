@@ -1,0 +1,12 @@
+# The image is built from pom.xml + src only; keep the build context small.
+.git
+.gitignore
+target
+backups
+uploads
+node_modules
+scripts
+*.md
+*.sql
+app-startup.log
+app-startup.err
