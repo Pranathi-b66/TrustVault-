@@ -66,6 +66,8 @@ const API = {
                 error.code = errData.code || null;
                 error.anomalyCount = errData.anomalyCount;
                 error.matchScore = errData.matchScore;
+                // Duplicate-enrollment contract: masked account that already owns the face.
+                error.conflictingAccount = errData.conflictingAccount || null;
 
                 // Global kill switch: surface the frozen perimeter to every caller (including the
                 // non-admin views that can never read the lockdown status endpoint themselves).

@@ -39,7 +39,16 @@ public class GlobalExceptionHandler {
         error.put("error", "Bad Request");
         error.put("code", DuplicateFaceException.CODE);
         error.put("detectedBy", ex.getDetectedBy());
-        error.put("message", ex.getMessage());
+        // Sign-up is unauthenticated, so the owner is named in masked form only: enough for the
+        // applicant to recognise their existing account without exposing another user's address.
+        String conflictingAccount = ex.getConflictingEmail();
+        if (conflictingAccount != null && !conflictingAccount.isBlank()) {
+            error.put("conflictingAccount", conflictingAccount);
+            error.put("message", "This face is already linked to " + conflictingAccount
+                    + ". Sign in with that account instead of registering a new one.");
+        } else {
+            error.put("message", ex.getMessage());
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
