@@ -157,7 +157,14 @@ function initAuthListeners() {
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Binding face descriptor & creating account...';
             const res = await API.register(email, password, fullName, role, scan.descriptor, 'webcam');
             showToast(`Registration complete! Face descriptor bound to ${res.fullName}.`, 'success');
-            renderDashboard(res);
+            try {
+                renderDashboard(res);
+            } catch (renderError) {
+                // The account and its face are already committed server-side; a rendering fault
+                // must never be reported to the user as a failed registration.
+                console.error(renderError);
+                window.location.reload();
+            }
         } catch (err) {
             showToast(`Registration failed: ${err.message}`, 'error');
         } finally {

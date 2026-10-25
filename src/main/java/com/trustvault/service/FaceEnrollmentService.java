@@ -62,7 +62,11 @@ public class FaceEnrollmentService {
     private final JwtTokenProvider jwtTokenProvider;
     private final BiometricChallengeService biometricChallengeService;
 
-    /** Similarity required to accept a live capture; also used to detect a duplicate enrollment. */
+    /**
+     * Similarity at which a re-capture is accepted as the face already bound to <b>this</b>
+     * account, making re-enrollment idempotent. Duplicate detection at sign-up uses the stricter
+     * distance ceiling below instead. 0.40 == distance 0.60.
+     */
     @Value("${trustvault.face.match-threshold:0.40}")
     private double matchThreshold;
 
@@ -81,6 +85,23 @@ public class FaceEnrollmentService {
 
     @Value("${trustvault.face.verify-max-distance:0.60}")
     private double configuredVerifyMaxDistance;
+
+    /**
+     * Duplicate-enrollment ceiling: a sign-up capture is rejected as already registered only when
+     * its euclidean distance to an existing template is at or below this value.
+     *
+     * <p>It is deliberately stricter than {@link #MAX_VERIFY_DISTANCE}. Verification compares a
+     * user with their own template, so 0.60 is the model's intra-person limit and tightening it
+     * would lock genuine users out. The sign-up scan instead compares a stranger with every
+     * stored template, and two different people can sit around 0.60 apart - a measured pair in
+     * this deployment was 0.601 - so the 0.60 boundary turned new applicants away. 0.45 blocks
+     * only near-identical faces; the accepted trade-off is that a close lookalike could claim a
+     * second account.</p>
+     */
+    public static final double DEFAULT_DUPLICATE_MAX_DISTANCE = 0.45d;
+
+    @Value("${trustvault.face.duplicate-max-distance:0.45}")
+    private double configuredDuplicateMaxDistance;
 
     /** Upper bound on enrollments inspected during the duplicate scan. */
     @Value("${trustvault.face.max-candidates:5000}")
@@ -245,9 +266,9 @@ public class FaceEnrollmentService {
     }
 
     /**
-     * Returns the enrollment of another account whose face <em>matches</em> the candidate
-     * capture, or {@code null} when the face is unclaimed. The exact-hash case is handled by the
-     * caller before this scan runs.
+     * Returns the enrollment of another account whose face falls within the duplicate ceiling of
+     * the candidate capture, or {@code null} when the face is unclaimed. The exact-hash case is
+     * handled by the caller before this scan runs.
      *
      * @param userId account to exclude from the scan, or {@code null} during sign-up when no
      *               account exists yet
@@ -273,7 +294,8 @@ public class FaceEnrollmentService {
                         stored.getId(), e.getMessage());
                 continue;
             }
-            if (faceMatcher.similarity(candidate, storedDescriptor) >= matchThreshold) {
+            double distance = faceMatcher.distance(candidate, storedDescriptor);
+            if (distance <= getDuplicateMaxDistance()) {
                 return stored;
             }
         }
@@ -439,6 +461,16 @@ public class FaceEnrollmentService {
     public double getVerifyMaxDistance() {
         double configured = configuredVerifyMaxDistance > 0 ? configuredVerifyMaxDistance : MAX_VERIFY_DISTANCE;
         return Math.max(0.05d, Math.min(configured, MAX_VERIFY_DISTANCE));
+    }
+
+    /**
+     * Effective duplicate ceiling: never looser than the identity ceiling (a face that cannot
+     * log in must never be accepted as new at sign-up) and never below a sane floor.
+     */
+    public double getDuplicateMaxDistance() {
+        double configured = configuredDuplicateMaxDistance > 0
+                ? configuredDuplicateMaxDistance : DEFAULT_DUPLICATE_MAX_DISTANCE;
+        return Math.max(0.05d, Math.min(configured, getVerifyMaxDistance()));
     }
 
     // =====================================================================

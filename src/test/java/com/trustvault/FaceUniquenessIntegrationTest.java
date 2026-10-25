@@ -113,7 +113,9 @@ public class FaceUniquenessIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("FACE_ALREADY_REGISTERED"))
                 .andExpect(jsonPath("$.detectedBy").value("exact-hash"))
-                .andExpect(jsonPath("$.message").value("Face already registered to another account."));
+                .andExpect(jsonPath("$.conflictingAccount").value("f***@internal.test"))
+                .andExpect(jsonPath("$.message").value(
+                        containsString("already linked to f***@internal.test")));
 
         assertTrue(faceEnrollmentRepository.findByUserId(second.getId()).isEmpty(),
                 "The rejected enrollment must not leave a face descriptor behind");
@@ -350,7 +352,9 @@ public class FaceUniquenessIntegrationTest {
                         .content(signUpBody(cloneEmail, FaceFixtures.descriptor(firstEmail))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("FACE_ALREADY_REGISTERED"))
-                .andExpect(jsonPath("$.message").value("Face already registered to another account."));
+                .andExpect(jsonPath("$.conflictingAccount").value("f***@internal.test"))
+                .andExpect(jsonPath("$.message").value(
+                        containsString("already linked to f***@internal.test")));
 
         assertTrue(userRepository.findByEmail(cloneEmail).isEmpty(),
                 "A duplicate face must abort sign-up before the profile row is written");
@@ -378,6 +382,36 @@ public class FaceUniquenessIntegrationTest {
                 .andExpect(jsonPath("$.detectedBy").value("face-match"));
 
         assertTrue(userRepository.findByEmail(cloneEmail).isEmpty());
+    }
+
+    @Test
+    @DisplayName("Sign-up: the duplicate ceiling is stricter than the login identity ceiling")
+    void signUpUsesStricterDuplicateCeiling() throws Exception {
+        String ownerEmail = "face.ceiling.owner@internal.test";
+        String closeEmail = "face.ceiling.close@internal.test";
+        String outsiderEmail = "face.ceiling.outsider@internal.test";
+        clearUser(ownerEmail);
+        clearUser(closeEmail);
+        clearUser(outsiderEmail);
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType("application/json")
+                        .content(signUpBody(ownerEmail, FaceFixtures.descriptor(ownerEmail))))
+                .andExpect(status().isOk());
+
+        // 0.40 apart: inside the duplicate ceiling, so this is still the same person.
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType("application/json")
+                        .content(signUpBody(closeEmail, FaceFixtures.atDistance(ownerEmail, 0.40))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("FACE_ALREADY_REGISTERED"));
+
+        // 0.50 apart: a different person who the old 0.60 boundary would have turned away.
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType("application/json")
+                        .content(signUpBody(outsiderEmail, FaceFixtures.atDistance(ownerEmail, 0.50))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(outsiderEmail));
     }
 
     @Test
